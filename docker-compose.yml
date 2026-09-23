@@ -1,0 +1,18 @@
+# Run with:  docker compose up -d
+# Put APP_SECRET and SETUP_CODE in a .env file next to this one (see .env.example).
+services:
+  luckygpt:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      APP_SECRET: ${APP_SECRET:?Set APP_SECRET in .env}
+      SETUP_CODE: ${SETUP_CODE:?Set SETUP_CODE in .env}
+      # Optional: use a separate Postgres instead of the built-in database
+      # DATABASE_URL: postgres://user:pass@host:5432/luckygpt
+    volumes:
+      - luckygpt-data:/data
+
+volumes:
+  luckygpt-data:

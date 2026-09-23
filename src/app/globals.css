@@ -1,0 +1,370 @@
+@import "tailwindcss";
+@import "highlight.js/styles/github-dark.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --surface: #ffffff;
+  --sidebar: #f9f9f9;
+  --elevated: #ffffff;
+  --hover: rgba(0, 0, 0, 0.05);
+  --active: rgba(0, 0, 0, 0.08);
+  --bubble: #f4f4f4;
+  --composer: #ffffff;
+  --muted: #f4f4f4;
+  --fg: #0d0d0d;
+  --fg-2: #5d5d5d;
+  --fg-3: #8f8f8f;
+  --line: rgba(0, 0, 0, 0.1);
+  --line-2: rgba(0, 0, 0, 0.06);
+  --accent: #0d0d0d;
+  --accent-fg: #ffffff;
+  --brand: #0d0d0d;
+  --link: #2964aa;
+  --danger: #e02e2a;
+  --toggle: #0d0d0d;
+  --code-bg: #f9f9f9;
+  --shadow-composer: 0 4px 4px 0 rgba(0, 0, 0, 0.04), 0 0 1px 0 rgba(0, 0, 0, 0.62);
+  --overlay: rgba(0, 0, 0, 0.4);
+}
+
+.dark {
+  --surface: #212121;
+  --sidebar: #181818;
+  --elevated: #353535;
+  --hover: rgba(255, 255, 255, 0.06);
+  --active: rgba(255, 255, 255, 0.1);
+  --bubble: #303030;
+  --composer: #303030;
+  --muted: #2f2f2f;
+  --fg: #ffffff;
+  --fg-2: #afafaf;
+  --fg-3: #8f8f8f;
+  --line: rgba(255, 255, 255, 0.12);
+  --line-2: rgba(255, 255, 255, 0.07);
+  --accent: #ffffff;
+  --accent-fg: #0d0d0d;
+  --brand: #ffffff;
+  --link: #7ab7ff;
+  --danger: #ff6b66;
+  --toggle: #ffffff;
+  --code-bg: #171717;
+  --shadow-composer: 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --overlay: rgba(0, 0, 0, 0.6);
+}
+
+/* Accent colors (Settings → General → Accent color) */
+[data-accent="blue"] { --toggle: #0169cc; --link: #0169cc; }
+[data-accent="green"] { --toggle: #00a240; --link: #008635; }
+[data-accent="yellow"] { --toggle: #e0ac00; --link: #a67f00; }
+[data-accent="pink"] { --toggle: #e0569e; --link: #c13f82; }
+[data-accent="orange"] { --toggle: #e25507; --link: #c24a06; }
+[data-accent="purple"] { --toggle: #924ff7; --link: #7a3fd9; }
+.dark[data-accent="blue"] { --link: #5aa9ff; }
+.dark[data-accent="green"] { --link: #40c977; }
+.dark[data-accent="yellow"] { --link: #ffd240; }
+.dark[data-accent="pink"] { --link: #ff8fc8; }
+.dark[data-accent="orange"] { --link: #ff9a5c; }
+.dark[data-accent="purple"] { --link: #b78bff; }
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-sidebar: var(--sidebar);
+  --color-elevated: var(--elevated);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-bubble: var(--bubble);
+  --color-composer: var(--composer);
+  --color-muted: var(--muted);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-link: var(--link);
+  --color-danger: var(--danger);
+  --color-toggle: var(--toggle);
+  --font-sans: ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif,
+    "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  overflow: hidden;
+}
+
+::selection {
+  background: rgba(41, 100, 170, 0.25);
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+/* Thin, unobtrusive scrollbars like ChatGPT */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(128, 128, 128, 0.35) transparent;
+}
+
+/* ---------- Markdown ---------- */
+.md {
+  font-size: 16px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 1rem;
+}
+.md h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.5rem 0 1rem;
+}
+.md h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 1.75rem 0 0.75rem;
+}
+.md h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 1.5rem 0 0.5rem;
+}
+.md h4,
+.md h5,
+.md h6 {
+  font-weight: 600;
+  margin: 1.25rem 0 0.5rem;
+}
+.md ul,
+.md ol {
+  margin: 0 0 1rem;
+  padding-left: 1.6rem;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li {
+  margin: 0.3rem 0;
+  padding-left: 0.2rem;
+}
+.md li > p {
+  margin: 0;
+}
+.md li > ul,
+.md li > ol {
+  margin: 0.25rem 0;
+}
+.md strong {
+  font-weight: 600;
+}
+.md a {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.md blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 1rem;
+  color: var(--fg-2);
+  margin: 0 0 1rem;
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1.5rem 0;
+}
+.md :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--muted);
+  border-radius: 0.375rem;
+  padding: 0.15rem 0.35rem;
+  font-weight: 500;
+}
+.md pre {
+  margin: 0;
+}
+.md pre code {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.md table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin: 0;
+}
+.md th,
+.md td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+.md th {
+  font-weight: 600;
+  border-bottom-color: var(--fg-3);
+}
+.md .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+/* Code highlighting background adapts to theme */
+.code-block .hljs {
+  background: transparent;
+  padding: 0;
+}
+html:not(.dark) .code-block .hljs {
+  color: #24292e;
+}
+html:not(.dark) .code-block .hljs-keyword,
+html:not(.dark) .code-block .hljs-selector-tag,
+html:not(.dark) .code-block .hljs-built_in {
+  color: #d73a49;
+}
+html:not(.dark) .code-block .hljs-string,
+html:not(.dark) .code-block .hljs-attr {
+  color: #032f62;
+}
+html:not(.dark) .code-block .hljs-title,
+html:not(.dark) .code-block .hljs-title.function_ {
+  color: #6f42c1;
+}
+html:not(.dark) .code-block .hljs-comment {
+  color: #6a737d;
+}
+html:not(.dark) .code-block .hljs-number,
+html:not(.dark) .code-block .hljs-literal,
+html:not(.dark) .code-block .hljs-variable {
+  color: #005cc5;
+}
+
+/* ---------- Animations ---------- */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.7);
+    opacity: 0.6;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--fg-3) 0%, var(--fg-3) 35%, var(--fg) 50%, var(--fg-3) 65%, var(--fg-3) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.fade-in {
+  animation: fade-in 0.18s ease-out;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.pop-in {
+  animation: pop-in 0.14s ease-out;
+}
+
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+@keyframes orb-swirl {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.voice-orb {
+  background: radial-gradient(circle at 30% 25%, #ffffff 0%, #c9e6ff 18%, #6fb6ff 45%, #2e7bff 72%, #1d4fd1 100%);
+  box-shadow: 0 0 60px rgba(70, 150, 255, 0.35);
+}
+.voice-orb-swirl {
+  background: conic-gradient(from 0deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0.35) 60%, rgba(255, 255, 255, 0) 85%, rgba(255, 255, 255, 0.55));
+  animation: orb-swirl 7s linear infinite;
+  mix-blend-mode: soft-light;
+}
+
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--fg-3);
+}
