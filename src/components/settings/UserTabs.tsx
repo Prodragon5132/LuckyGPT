@@ -241,6 +241,12 @@ export function PersonalizationTab() {
         >
           <Toggle checked={prefs.memoryEnabled} onChange={(memoryEnabled) => void setPrefs({ memoryEnabled })} />
         </Row>
+        <Row
+          label="Reference chat history"
+          description="Let LuckyGPT search your past chats when you ask about something from before, even if it wasn't saved as a memory."
+        >
+          <Toggle checked={prefs.chatHistoryEnabled !== false} onChange={(chatHistoryEnabled) => void setPrefs({ chatHistoryEnabled })} />
+        </Row>
         <Row label="Manage memories">
           <Button size="sm" onClick={() => set({ memoriesOpen: true })}>
             Manage

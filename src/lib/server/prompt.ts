@@ -18,6 +18,7 @@ export function buildSystemPrompt(opts: {
   prefs: UserPrefs;
   memories: Memory[];
   memoryEnabled: boolean;
+  hasChatSearch?: boolean;
   project: Project | null;
   projectFiles: { name: string; text: string }[];
   gpt: Gpt | null;
@@ -102,6 +103,15 @@ export function buildSystemPrompt(opts: {
         "Use memories naturally when relevant, without saying \"according to my memory\". " +
         "When the user shares a lasting, useful fact or preference (name, family, job, goals, projects, likes/dislikes), or explicitly asks you to remember something, call save_memory with one short sentence. " +
         "If they ask you to forget something, call forget_memory with the id in brackets. Don't save trivial, temporary, or highly sensitive details (health, finances, passwords) unless asked.",
+    );
+  }
+
+  if (opts.hasChatSearch) {
+    parts.push(
+      "You can search the user's past conversations with search_chats. Use it when they ask about something from an earlier chat " +
+        "(\"what did we talk about…\", \"find the recipe you gave me\", \"what was that name I mentioned?\"), or when earlier context " +
+        "would clearly help and it isn't in your saved memories. Search with a few specific keywords; try different words if nothing comes up. " +
+        "Mention naturally that you found it in a past chat. Don't search for every message.",
     );
   }
 

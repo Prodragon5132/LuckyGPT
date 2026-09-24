@@ -292,3 +292,95 @@ export async function searchChats(userId: string, q: string, limit = 30): Promis
   hits.sort((a, b) => b.chat.updatedAt - a.chat.updatedAt);
   return hits.slice(0, limit);
 }
+
+export interface HistoryHit {
+  chatId: string;
+  title: string;
+  date: number;
+  excerpts: { role: "user" | "assistant"; text: string; date: number }[];
+}
+
+const STOPWORDS = new Set(
+  "a an and are as at be but by can did do does for from had has have how i in is it its me my of on or our so that the their them then there these they this to was we were what when where which who why will with you your about did said tell told remember find search chat chats talked talk earlier before last time".split(
+    " ",
+  ),
+);
+
+/**
+ * Keyword search over the user's past conversations, for the AI's search_chats tool.
+ * Chats are encrypted at rest, so they're decrypted in memory here; no plaintext index is ever stored.
+ */
+export async function searchChatHistory(
+  userId: string,
+  q: string,
+  opts: { excludeChatId?: string | null; limit?: number } = {},
+): Promise<HistoryHit[]> {
+  const phrase = q.trim().toLowerCase();
+  const terms = [...new Set(phrase.split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 2 && !STOPWORDS.has(t)))].slice(0, 12);
+  if (!terms.length && !phrase) return [];
+  const chats = await query<ChatRow>(`SELECT ${CHAT_COLS} FROM chats WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1000`, [userId]);
+  const byId = new Map(chats.filter((c) => c.id !== opts.excludeChatId).map((c) => [c.id, c]));
+  if (!byId.size) return [];
+  const rows = await query<MessageRow>(
+    `SELECT id, chat_id, parent_id, role, content, model, status, feedback, created_at FROM messages WHERE chat_id = ANY($1::text[])`,
+    [[...byId.keys()]],
+  );
+
+  const scoreText = (lower: string) => {
+    let score = phrase.length > 3 && lower.includes(phrase) ? 6 : 0;
+    for (const t of terms) {
+      let n = 0;
+      for (let i = lower.indexOf(t); i >= 0 && n < 3; i = lower.indexOf(t, i + t.length)) n++;
+      score += n ? 1 + Math.min(n, 3) * 0.5 : 0;
+    }
+    return score;
+  };
+  const excerpt = (text: string, lower: string) => {
+    const at = Math.max(0, Math.min(...[phrase, ...terms].map((t) => lower.indexOf(t)).filter((i) => i >= 0)));
+    const start = Math.max(0, at - 160);
+    return (start > 0 ? "…" : "") + text.slice(start, at + 340).replace(/\s+/g, " ").trim() + (at + 340 < text.length ? "…" : "");
+  };
+
+  const perChat = new Map<string, { score: number; hits: { score: number; ex: HistoryHit["excerpts"][number] }[] }>();
+  for (const r of rows) {
+    if (r.role !== "user" && r.role !== "assistant") continue;
+    const text = toMessage(r).text;
+    if (!text) continue;
+    const lower = text.toLowerCase();
+    const s = scoreText(lower);
+    if (!s) continue;
+    const entry = perChat.get(r.chat_id) ?? { score: 0, hits: [] };
+    entry.score += s;
+    entry.hits.push({ score: s, ex: { role: r.role as "user" | "assistant", text: excerpt(text, lower), date: num(r.created_at) } });
+    perChat.set(r.chat_id, entry);
+  }
+  for (const [id, c] of byId) {
+    const title = toSummary(c).title.toLowerCase();
+    const s = scoreText(title);
+    if (s) {
+      const entry = perChat.get(id) ?? { score: 0, hits: [] };
+      entry.score += s * 1.5;
+      perChat.set(id, entry);
+    }
+  }
+
+  return [...perChat.entries()]
+    .map(([id, e]) => {
+      const c = toSummary(byId.get(id)!);
+      // Slightly prefer recent chats when scores are close.
+      const ageDays = (Date.now() - c.updatedAt) / 86_400_000;
+      return { id, c, e, rank: e.score / (1 + ageDays / 365) };
+    })
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, opts.limit ?? 5)
+    .map(({ id, c, e }) => ({
+      chatId: id,
+      title: c.title,
+      date: c.updatedAt,
+      excerpts: e.hits
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+        .map((h) => h.ex)
+        .sort((a, b) => a.date - b.date),
+    }));
+}

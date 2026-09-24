@@ -117,6 +117,8 @@ export interface UserPrefs {
     about: string;
   };
   memoryEnabled: boolean;
+  /** Let the AI search past conversations (ChatGPT's "Reference chat history"). */
+  chatHistoryEnabled?: boolean;
   followUps: boolean;
   autoReadAloud?: boolean;
   /** Speaking speed for voice replies and Read aloud (1 = the voice's normal speed). */
@@ -132,6 +134,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   personality: "default",
   customInstructions: { enabled: true, nickname: "", occupation: "", traits: "", about: "" },
   memoryEnabled: true,
+  chatHistoryEnabled: true,
   followUps: true,
   voiceSpeed: 1.3,
 };

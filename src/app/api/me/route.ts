@@ -19,6 +19,7 @@ const prefsSchema = z
       about: z.string().max(1500),
     }),
     memoryEnabled: z.boolean(),
+    chatHistoryEnabled: z.boolean(),
     followUps: z.boolean(),
     autoReadAloud: z.boolean(),
     voiceSpeed: z.number().min(0.5).max(2.5),

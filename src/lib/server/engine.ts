@@ -29,6 +29,7 @@ import {
   getBranch,
   getChatRow,
   insertMessage,
+  searchChatHistory,
   updateChat,
   updateMessageBody,
 } from "./repo/chats";
@@ -591,6 +592,8 @@ async function generate(ctx: {
 
   const memoryEnabled = ctx.prefs.memoryEnabled && !ctx.temporary && !ctx.gpt && cfg.capabilities.tools;
   const memories = ctx.prefs.memoryEnabled && !ctx.temporary ? await listMemories(user.id) : [];
+  // Searching past chats (like ChatGPT's "Reference chat history"). Off in temporary chats.
+  const chatSearchEnabled = ctx.prefs.chatHistoryEnabled !== false && !ctx.temporary && cfg.capabilities.tools;
 
   const imgModel = imageModel(config, secrets);
   const lastUserImages = [...ctx.history].reverse().find((h) => h.role === "user")?.attachments.filter((a) => a.mime.startsWith("image/")) ?? [];
@@ -637,6 +640,27 @@ async function generate(ctx: {
           const activity = showActivity({ id: newId(), kind: "memory", label: "Updated saved memory", status: "done" });
           done.push({ kind: "memory", note: `Deleted the memory "${match.content.slice(0, 200)}"`, activity });
           return { deleted: true, next: "Memory deleted. Now reply to the user normally." };
+        },
+      });
+    }
+    if (chatSearchEnabled) {
+      functionTools.search_chats = tool({
+        description:
+          "Search the user's past conversations (not just saved memories) for something discussed before. Returns matching chats with excerpts.",
+        inputSchema: z.object({ query: z.string().describe("A few specific keywords, e.g. 'lasagna recipe' or 'dentist appointment'") }),
+        execute: async ({ query: q }) => {
+          const id = newId();
+          send({ type: "activity", activity: { id, kind: "memory", label: "Searching your chats", status: "running" } });
+          const hits = await searchChatHistory(user.id, q, { excludeChatId: ctx.chatId, limit: 5 });
+          showActivity({ id, kind: "memory", label: hits.length ? "Searched your chats" : "Searched your chats (nothing found)", status: "done" });
+          if (!hits.length) return { results: [], note: "No past chats matched. Try other keywords, or tell the user you couldn't find it." };
+          return {
+            results: hits.map((h) => ({
+              chat: h.title,
+              date: new Date(h.date).toISOString().slice(0, 10),
+              excerpts: h.excerpts.map((e) => `${e.role === "user" ? "User" : "You"} (${new Date(e.date).toISOString().slice(0, 10)}): ${e.text}`),
+            })),
+          };
         },
       });
     }
@@ -705,6 +729,7 @@ async function generate(ctx: {
     prefs: ctx.prefs,
     memories,
     memoryEnabled,
+    hasChatSearch: !!tools.search_chats,
     project: ctx.project,
     projectFiles,
     gpt: ctx.gpt,
