@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { handler, json } from "@/lib/server/http";
 import { getSecrets } from "@/lib/server/settings";
-import { listRemoteModels } from "@/lib/server/admin";
+import { listOpenRouterTtsModels, listRemoteModels } from "@/lib/server/admin";
 
 export const GET = handler(
   async (req) => {
+    if (req.nextUrl.searchParams.get("kind") === "tts") return json(await listOpenRouterTtsModels());
     const provider = z
       .enum(["openai", "anthropic", "google", "openrouter", "custom"])
       .parse(req.nextUrl.searchParams.get("provider"));

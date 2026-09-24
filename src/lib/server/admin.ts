@@ -160,3 +160,30 @@ export async function listRemoteModels(
     }
   }
 }
+
+/** Known OpenRouter text-to-speech models, shown even if the live list can't be loaded. */
+const OPENROUTER_TTS_KNOWN = [
+  { modelId: "google/gemini-3.1-flash-tts-preview", name: "Google: Gemini 3.1 Flash TTS Preview" },
+  { modelId: "openai/gpt-4o-mini-tts-2025-12-15", name: "OpenAI: GPT-4o Mini TTS" },
+];
+
+/** OpenRouter's text-to-speech models (the ones that output speech/audio). */
+export async function listOpenRouterTtsModels(): Promise<{ modelId: string; name: string }[]> {
+  let live: { modelId: string; name: string }[] = [];
+  try {
+    const data = (await getJson("https://openrouter.ai/api/v1/models?output_modalities=all", {})) as {
+      data: { id: string; name: string; architecture?: { output_modalities?: string[] } }[];
+    };
+    live = data.data
+      .filter((m) => {
+        const out = m.architecture?.output_modalities ?? [];
+        const speaks = out.some((o) => o === "speech" || o === "audio") && !out.includes("text");
+        return speaks || /(^|[-/])tts|text-to-speech/i.test(m.id);
+      })
+      .map((m) => ({ modelId: m.id, name: m.name }));
+  } catch {
+    // Fall back to the known list below.
+  }
+  const seen = new Set(live.map((m) => m.modelId));
+  return [...live, ...OPENROUTER_TTS_KNOWN.filter((m) => !seen.has(m.modelId))];
+}

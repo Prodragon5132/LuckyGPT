@@ -112,6 +112,22 @@ function SaveBar({ dirty, saving, onSave, onReset }: { dirty: boolean; saving: b
 
 // ---------- API keys ----------
 
+/**
+ * API keys aren't passwords: a masked text field (not type="password") keeps
+ * Google/browser password managers from offering to save them to an account.
+ */
+const SECRET_INPUT = {
+  type: "text",
+  autoComplete: "off",
+  autoCorrect: "off",
+  autoCapitalize: "off",
+  spellCheck: false,
+  "data-1p-ignore": "true",
+  "data-lpignore": "true",
+  "data-bwignore": "true",
+  "data-form-type": "other",
+} as const;
+
 const PROVIDERS: { id: SecretProvider; name: string; blurb: string; url: string; placeholder: string }[] = [
   { id: "openai", name: "OpenAI", blurb: "GPT models, image generation, and natural voices.", url: "https://platform.openai.com/api-keys", placeholder: "sk-..." },
   { id: "anthropic", name: "Anthropic", blurb: "Claude models.", url: "https://console.anthropic.com/settings/keys", placeholder: "sk-ant-..." },
@@ -183,13 +199,11 @@ export function KeysTab() {
           </div>
           <div className="flex gap-2">
             <input
-              type="password"
-              autoComplete="off"
-              spellCheck={false}
+              {...SECRET_INPUT}
               placeholder={view.keys[p.id] ? "Paste a new key to replace it" : p.placeholder}
               value={inputs[p.id] ?? ""}
               onChange={(e) => setInputs((i) => ({ ...i, [p.id]: e.target.value }))}
-              className={cn(inputClass, "py-2")}
+              className={cn(inputClass, "secret-input py-2")}
             />
             <Button
               size="sm"
@@ -242,9 +256,8 @@ export function KeysTab() {
             onChange={(e) => setCustom({ ...custom, baseURL: e.target.value })}
           />
           <input
-            className={cn(inputClass, "sm:col-span-2")}
-            type="password"
-            autoComplete="off"
+            className={cn(inputClass, "secret-input sm:col-span-2")}
+            {...SECRET_INPUT}
             placeholder="API key (optional)"
             value={custom.apiKey}
             onChange={(e) => setCustom({ ...custom, apiKey: e.target.value })}
@@ -640,6 +653,43 @@ const TTS_DEFAULTS: Record<string, string> = {
 const OPENAI_VOICES = ["alloy", "ash", "ballad", "cedar", "coral", "echo", "fable", "marin", "nova", "onyx", "sage", "shimmer", "verse"];
 const GEMINI_VOICES = ["Kore", "Puck", "Zephyr", "Charon", "Fenrir", "Leda", "Aoede", "Orus", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"];
 
+/** Pick an OpenRouter text-to-speech model from OpenRouter's list, or type any model ID. */
+function OpenRouterTtsModel({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [list, setList] = useState<{ modelId: string; name: string }[] | null>(null);
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api<{ modelId: string; name: string }[]>("/api/admin/provider-models?kind=tts")
+      .then((l) => alive && setList(l))
+      .catch(() => alive && setList([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!list) return <Spinner size={16} />;
+  const known = list.some((m) => m.modelId === value);
+  if (typing || !list.length || (!known && value)) {
+    return (
+      <div className="flex items-center gap-2">
+        <input className={cn(inputClass, "w-56 py-1.5 font-mono")} value={value} placeholder="provider/model-id" onChange={(e) => onChange(e.target.value)} />
+        {list.length > 0 && (
+          <button className="text-xs text-link hover:underline" onClick={() => (setTyping(false), onChange(list[0].modelId))}>
+            List
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <Select
+      value={value}
+      onChange={(v) => (v === "__other" ? (setTyping(true), onChange("")) : onChange(v))}
+      options={[...list.map((m) => ({ value: m.modelId, label: m.name })), { value: "__other", label: "Other (type a model ID)…" }]}
+      className="max-w-[240px]"
+    />
+  );
+}
+
 export function VoiceTab() {
   const { view, draft, setDraft, save, saving, dirty } = useAdminConfig();
   if (!view || !draft) return <Spinner size={18} />;
@@ -717,11 +767,15 @@ export function VoiceTab() {
                 keyMissing(v.tts.provider) ? (
                   <span className="text-danger">Add this provider&apos;s API key first.</span>
                 ) : v.tts.provider === "openrouter" ? (
-                  "Any OpenRouter text-to-speech model, e.g. google/gemini-3.1-flash-tts-preview or openai/gpt-4o-mini-tts."
+                  "OpenRouter's voice models."
                 ) : undefined
               }
             >
-              <input className={cn(inputClass, "w-56 py-1.5 font-mono")} value={v.tts.model} onChange={(e) => setV({ tts: { ...v.tts, model: e.target.value } })} />
+              {v.tts.provider === "openrouter" ? (
+                <OpenRouterTtsModel value={v.tts.model} onChange={(model) => setV({ tts: { ...v.tts, model } })} />
+              ) : (
+                <input className={cn(inputClass, "w-56 py-1.5 font-mono")} value={v.tts.model} onChange={(e) => setV({ tts: { ...v.tts, model: e.target.value } })} />
+              )}
             </Row>
             {v.tts.provider === "openrouter" && !voiceOptions.length ? (
               <Row label="Voice" description="The voice name this model uses (see the model's page on OpenRouter).">

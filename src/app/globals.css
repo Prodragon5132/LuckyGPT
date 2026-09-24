@@ -368,3 +368,8 @@ textarea::placeholder,
 input::placeholder {
   color: var(--fg-3);
 }
+
+/* API key fields: masked like a password, but not a password field (so password managers ignore them). */
+.secret-input:not(:placeholder-shown) {
+  -webkit-text-security: disc;
+}
