@@ -97,6 +97,26 @@ interface HistoryItem {
 
 const MAX_ATTEMPTS = 3;
 
+/**
+ * Something a tool already did during this reply (saved a memory, made an image, wrote the canvas).
+ * If the reply is retried, these are kept and shown again, never repeated, and the model is told
+ * they're done so it just answers.
+ */
+interface DoneAction {
+  kind: "memory" | "image" | "canvas";
+  note: string;
+  activity?: Activity;
+  image?: Attachment;
+  canvas?: Canvas;
+}
+
+/** What to say if the model did the action but then wrote nothing, even after retries. */
+function doneFallbackText(done: DoneAction[]): string {
+  if (done.some((d) => d.kind === "image")) return "Here's your image.";
+  if (done.some((d) => d.kind === "canvas")) return "I've updated the canvas.";
+  return "Got it — I'll remember that.";
+}
+
 class EmptyReplyError extends Error {
   constructor() {
     super("empty response");
@@ -422,6 +442,7 @@ export async function runChat(user: SessionUser, req: ChatRequest, signal: Abort
       try {
         // Provider hiccups ("upstream" errors, overloads, empty replies) are retried quietly:
         // up to 3 attempts before the person sees an error.
+        const done: DoneAction[] = [];
         for (let attempt = 1; ; attempt++) {
           try {
             await generate({
@@ -443,15 +464,47 @@ export async function runChat(user: SessionUser, req: ChatRequest, signal: Abort
               send,
               persist,
               signal,
+              done,
             });
-            if (!signal.aborted && !body.text && !body.images?.length && !body.canvas) throw new EmptyReplyError();
+            if (!signal.aborted && !body.text.trim()) {
+              if (done.length && attempt >= MAX_ATTEMPTS - 1) {
+                // It did what was asked (e.g. saved the memory) but wrote nothing: confirm instead of erroring.
+                body.text = doneFallbackText(done);
+                send({ type: "text", delta: body.text });
+              } else if (!body.images?.length && !body.canvas) throw new EmptyReplyError();
+            }
             break;
           } catch (err) {
-            if (signal.aborted || attempt >= MAX_ATTEMPTS || !isRetryable(err)) throw err;
+            if (signal.aborted) throw err;
+            if (attempt >= MAX_ATTEMPTS || !isRetryable(err)) {
+              // The action worked even though the model's follow-up failed: don't call the whole reply a failure.
+              if (done.length && !body.text.trim()) {
+                console.warn("[chat] reply failed after tools ran; confirming instead:", err instanceof Error ? err.message : err);
+                body.text = doneFallbackText(done);
+                send({ type: "text", delta: body.text });
+                break;
+              }
+              throw err;
+            }
             console.warn(`[chat] attempt ${attempt} failed, retrying:`, err instanceof Error ? err.message : err);
             for (const key of Object.keys(body) as (keyof MessageBody)[]) if (key !== "voice") delete body[key];
             body.text = "";
             send({ type: "reset" });
+            // Keep what already worked on screen.
+            for (const d of done) {
+              if (d.activity) {
+                body.activity = [...(body.activity ?? []), d.activity];
+                send({ type: "activity", activity: d.activity });
+              }
+              if (d.image) {
+                body.images = [...(body.images ?? []), d.image];
+                send({ type: "image", image: d.image });
+              }
+              if (d.canvas) {
+                body.canvas = d.canvas;
+                send({ type: "canvas", canvas: d.canvas });
+              }
+            }
             await sleep(attempt * 800, signal);
           }
         }
@@ -526,8 +579,15 @@ async function generate(ctx: {
   send: (e: StreamEvent) => void;
   persist: (final: boolean) => Promise<void>;
   signal: AbortSignal;
+  done: DoneAction[];
 }) {
-  const { user, config, secrets, cfg, toolsOn, body, send, signal } = ctx;
+  const { user, config, secrets, cfg, toolsOn, body, send, signal, done } = ctx;
+  const didAlready = (kind: DoneAction["kind"]) => done.some((d) => d.kind === kind);
+  const showActivity = (a: Activity) => {
+    body.activity = [...(body.activity ?? []), a];
+    send({ type: "activity", activity: a });
+    return a;
+  };
 
   const memoryEnabled = ctx.prefs.memoryEnabled && !ctx.temporary && !ctx.gpt && cfg.capabilities.tools;
   const memories = ctx.prefs.memoryEnabled && !ctx.temporary ? await listMemories(user.id) : [];
@@ -536,7 +596,7 @@ async function generate(ctx: {
   const lastUserImages = [...ctx.history].reverse().find((h) => h.role === "user")?.attachments.filter((a) => a.mime.startsWith("image/")) ?? [];
 
   // Fallback: "Create image" with a model that can't call tools → generate directly.
-  if (toolsOn.image && imgModel && !cfg.capabilities.tools && !cfg.capabilities.imageOutput) {
+  if (toolsOn.image && imgModel && !cfg.capabilities.tools && !cfg.capabilities.imageOutput && !didAlready("image")) {
     const prompt = ctx.history[ctx.history.length - 1]?.text || "An image";
     await runImageTool({ ...ctx, imgModel, prompt, aspect: "1:1", useUploaded: lastUserImages.length > 0, lastUserImages });
     body.text = "Here's your image.";
@@ -555,14 +615,16 @@ async function generate(ctx: {
 
   const functionTools: ToolSet = {};
   if (cfg.capabilities.tools) {
-    if (memoryEnabled) {
+    if (memoryEnabled && !didAlready("memory")) {
       functionTools.save_memory = tool({
         description: "Save a short, lasting fact or preference about the user to long-term memory.",
         inputSchema: z.object({ memory: z.string().describe("One short sentence, e.g. 'Has a dog named Max.'") }),
         execute: async ({ memory }) => {
-          await addMemory(user.id, memory);
-          send({ type: "activity", activity: { id: newId(), kind: "memory", label: "Updated saved memory", status: "done" } });
-          return { saved: true };
+          const norm = (t: string) => t.trim().toLowerCase().replace(/[.!\s]+$/, "");
+          if (!memories.some((m) => norm(m.content) === norm(memory))) await addMemory(user.id, memory);
+          const activity = showActivity({ id: newId(), kind: "memory", label: "Updated saved memory", status: "done" });
+          done.push({ kind: "memory", note: `Saved to memory: "${memory.slice(0, 200)}"`, activity });
+          return { saved: true, next: "Memory saved. Now reply to the user normally." };
         },
       });
       functionTools.forget_memory = tool({
@@ -572,12 +634,13 @@ async function generate(ctx: {
           const match = memories.find((m) => m.id.startsWith(memory_id.replace(/[[\]]/g, "").trim()));
           if (!match) return { deleted: false, reason: "not found" };
           await deleteMemory(user.id, match.id);
-          send({ type: "activity", activity: { id: newId(), kind: "memory", label: "Updated saved memory", status: "done" } });
-          return { deleted: true };
+          const activity = showActivity({ id: newId(), kind: "memory", label: "Updated saved memory", status: "done" });
+          done.push({ kind: "memory", note: `Deleted the memory "${match.content.slice(0, 200)}"`, activity });
+          return { deleted: true, next: "Memory deleted. Now reply to the user normally." };
         },
       });
     }
-    if (imgModel && !ctx.voice && toolsOn.image !== false) {
+    if (imgModel && !ctx.voice && toolsOn.image !== false && !didAlready("image")) {
       functionTools.generate_image = tool({
         description: "Create an image from a text description (or edit the user's uploaded images). The image is shown to the user automatically.",
         inputSchema: z.object({
@@ -586,12 +649,16 @@ async function generate(ctx: {
           use_uploaded_images: z.boolean().describe("true to edit/transform the images the user attached"),
         }),
         execute: async ({ prompt, aspect_ratio, use_uploaded_images }) => {
+          const before = body.images?.length ?? 0;
           await runImageTool({ ...ctx, imgModel, prompt, aspect: aspect_ratio, useUploaded: use_uploaded_images, lastUserImages });
+          const image = body.images?.[before];
+          const activity = body.activity?.[body.activity.length - 1];
+          if (image) done.push({ kind: "image", note: "Created the requested image (it's already shown to the user)", image, activity });
           return { status: "The image was generated and is already displayed to the user. Do not include links or markdown images." };
         },
       });
     }
-    if (canvasOn) {
+    if (canvasOn && !didAlready("canvas")) {
       functionTools.canvas_write = tool({
         description: "Write or rewrite the canvas document/code shown next to the chat. Always send the complete content.",
         inputSchema: z.object({
@@ -604,6 +671,7 @@ async function generate(ctx: {
           const canvas: Canvas = { id: currentCanvas?.id ?? newId(), title, kind, language: language || undefined, content };
           body.canvas = canvas;
           send({ type: "canvas", canvas });
+          done.push({ kind: "canvas", note: `Wrote the canvas "${title.slice(0, 100)}" (already shown to the user)`, canvas });
           return { ok: true };
         },
       });
@@ -631,7 +699,7 @@ async function generate(ctx: {
     );
   }
 
-  const system = buildSystemPrompt({
+  const baseSystem = buildSystemPrompt({
     modelName: cfg.name,
     userName: ctx.userName,
     prefs: ctx.prefs,
@@ -649,6 +717,10 @@ async function generate(ctx: {
     voice: ctx.voice,
     timezone: ctx.timezone,
   });
+  // Retrying after a tool already worked: say so, so the model just answers instead of redoing it.
+  const system = done.length
+    ? `${baseSystem}\n\nAlready done during this reply (it worked; don't do it again, just reply to the user):\n${done.map((d) => `- ${d.note}`).join("\n")}`
+    : baseSystem;
 
   const helper = cfg.capabilities.vision ? null : resolveVisionHelper(config, secrets);
   const describe = helper ? makeDescriber({ userId: user.id, helper, secrets, send, body, signal }) : undefined;
