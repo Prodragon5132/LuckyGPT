@@ -3,6 +3,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { applyTheme, useApp } from "@/lib/client/store";
+import { api } from "@/lib/client/api";
 import type { UserInfo } from "@/lib/shared/types";
 import { Sidebar, newChat } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -101,6 +102,33 @@ export function AppShell({ initialUser }: { initialUser: UserInfo }) {
   }, [router, set]);
 
   useEffect(() => setVoiceSpeed(voiceSpeed ?? 1.3), [voiceSpeed]);
+
+  // Anonymous crash reports for the admin's error log: just the error and the page type, never content.
+  useEffect(() => {
+    const seen = new Set<string>();
+    const report = (message: string, stack?: string) => {
+      if (!message || seen.size >= 10 || seen.has(message)) return;
+      // Browser-extension noise and harmless layout warnings aren't ours to fix.
+      if (/ResizeObserver loop|extension:\/\/|Script error\.?$/i.test(`${message} ${stack ?? ""}`)) return;
+      seen.add(message);
+      void api("/api/errors", {
+        method: "POST",
+        body: { message: message.slice(0, 1000), stack: stack?.slice(0, 4000), where: location.pathname },
+      }).catch(() => {});
+    };
+    const onError = (e: ErrorEvent) => report(e.message, e.error instanceof Error ? e.error.stack : undefined);
+    const onRejection = (e: PromiseRejectionEvent) => {
+      const r = e.reason;
+      if (r?.name === "AbortError") return;
+      report(r instanceof Error ? r.message : String(r), r instanceof Error ? r.stack : undefined);
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
 
   // iPhone: audio may only start from a tap, so unlock the shared player on the first taps.
   useEffect(() => {

@@ -4,6 +4,7 @@ import { handler, readJson, HttpError } from "@/lib/server/http";
 import { getConfig, getSecrets } from "@/lib/server/settings";
 import { speechModel, ttsVoices, voiceErrorMessage } from "@/lib/server/providers";
 import { consume } from "@/lib/server/ratelimit";
+import { logError } from "@/lib/server/errorlog";
 
 export const maxDuration = 60;
 
@@ -44,6 +45,7 @@ export const POST = handler(async (req, { user }) => {
     });
   } catch (err) {
     console.error("[voice] text-to-speech failed", err);
+    void logError("text-to-speech", err, { provider, model: config.voice.tts.model });
     throw new HttpError(502, voiceErrorMessage(err, "Text-to-speech"));
   }
 });

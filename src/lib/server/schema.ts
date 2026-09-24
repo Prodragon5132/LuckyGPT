@@ -128,4 +128,14 @@ CREATE TABLE shares (
 );
 CREATE INDEX shares_user_idx ON shares(user_id)
 `,
+  // 2: private error log (no user ids or content; see errorlog.ts)
+  `
+CREATE TABLE error_logs (
+  id TEXT PRIMARY KEY,
+  at BIGINT NOT NULL,
+  source TEXT NOT NULL,
+  data TEXT NOT NULL
+);
+CREATE INDEX error_logs_at_idx ON error_logs(at)
+`,
 ];

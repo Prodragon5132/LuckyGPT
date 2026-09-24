@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useApp } from "@/lib/client/store";
+import { applyTheme, useApp } from "@/lib/client/store";
 import { api } from "@/lib/client/api";
 import { cn, initials, isMac, useIsDesktop } from "@/lib/client/utils";
 import type { ChatSummary, UsageInfo } from "@/lib/shared/types";
 import {
+  MoonIcon,
+  MonitorIcon,
+  SunIcon,
   ArchiveIcon,
   ChevronDown,
   DotsIcon,
@@ -288,6 +291,47 @@ function UsageBars() {
   );
 }
 
+/** Light / Dark / System, one tap away (also in Settings → General → Theme). */
+function ThemeSwitch() {
+  const prefs = useApp((s) => s.user?.prefs);
+  const setPrefs = useApp((s) => s.setPrefs);
+  if (!prefs) return null;
+  const options = [
+    { value: "light", label: "Light", icon: <SunIcon size={16} /> },
+    { value: "dark", label: "Dark", icon: <MoonIcon size={16} /> },
+    { value: "system", label: "System", icon: <MonitorIcon size={16} /> },
+  ] as const;
+  return (
+    <>
+      <MenuSeparator />
+      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+        <span className="text-sm">Theme</span>
+        <div className="flex rounded-full bg-muted p-0.5" role="radiogroup" aria-label="Theme">
+          {options.map((o) => (
+            <button
+              key={o.value}
+              role="radio"
+              aria-checked={prefs.theme === o.value}
+              aria-label={o.label}
+              title={o.label}
+              onClick={() => {
+                applyTheme(o.value, prefs.accent);
+                void setPrefs({ theme: o.value });
+              }}
+              className={cn(
+                "flex h-7 w-8 items-center justify-center rounded-full text-fg-2",
+                prefs.theme === o.value ? "bg-elevated text-fg shadow-sm dark:bg-[#4a4a4a]" : "hover:text-fg",
+              )}
+            >
+              {o.icon}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ProfileMenu({ compact }: { compact?: boolean }) {
   const user = useApp((s) => s.user);
   const set = useApp((s) => s.set);
@@ -325,6 +369,7 @@ function ProfileMenu({ compact }: { compact?: boolean }) {
           <span className="truncate">@{user.username}</span>
         </div>
         <UsageBars />
+        <ThemeSwitch />
         <MenuSeparator />
         <MenuItem
           icon={<PaletteIcon size={18} />}

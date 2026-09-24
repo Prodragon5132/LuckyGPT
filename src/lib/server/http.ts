@@ -105,6 +105,7 @@ export function handler(
         );
       }
       console.error("[api]", req.method, req.nextUrl.pathname, err);
+      void import("./errorlog").then((m) => m.logError("server", err, { where: `${req.method} ${req.nextUrl.pathname}` }));
       return json({ error: "Something went wrong. Please try again." }, { status: 500 });
     }
   };

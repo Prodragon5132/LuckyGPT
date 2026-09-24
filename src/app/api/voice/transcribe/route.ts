@@ -4,6 +4,7 @@ import { getConfig, getSecrets } from "@/lib/server/settings";
 import { sttReady, transcribeOpenRouter, transcriptionModel, voiceErrorMessage } from "@/lib/server/providers";
 import { loadUserInfo } from "@/lib/server/auth";
 import { consume } from "@/lib/server/ratelimit";
+import { logError } from "@/lib/server/errorlog";
 
 export const maxDuration = 60;
 
@@ -37,6 +38,7 @@ export const POST = handler(async (req, { user }) => {
     return json({ text: result.text.trim() });
   } catch (err) {
     console.error("[voice] speech-to-text failed", err);
+    void logError("speech-to-text", err, { provider, model: config.voice.stt.model });
     throw new HttpError(502, voiceErrorMessage(err, "Speech-to-text"));
   }
 });

@@ -28,7 +28,8 @@ The app is free. You only pay the AI provider for what you actually use, usually
   - 🌀 **Voice mode**: a full-screen orb conversation that listens, thinks, and talks back, and you can interrupt it by talking.
 - **Memory**: LuckyGPT remembers useful things you tell it. You can see and delete memories in Settings → Personalization.
 - **Reference chat history**: ask "what was that recipe from last week?" and LuckyGPT searches your past chats, even for things that were never saved as a memory. It can also search on its own when earlier context would help. Chats stay encrypted: they're only decrypted in memory while searching, and no plaintext index is ever stored. Turn it off in Settings → Personalization.
-- **Custom instructions & personality** (Default, Cynic, Robot, Listener, Nerd), plus theme (System/Light/Dark) and accent color.
+- **Custom instructions & personality** (Default, Cynic, Robot, Listener, Nerd), plus theme (System/Light/Dark, also one tap away in the profile menu) and accent color.
+- **Private error log** (Settings → Error logs, admins only): records what went wrong (for example "OpenRouter returned 502" or a page crash) without any chat text, names, emails, keys or ids. It never leaves your server; copy or download it when asking for help.
 - **Temporary chat**: not saved, and doesn't use or change memory.
 - **Projects**: folders of chats with their own instructions and files.
 - **GPTs**: build your own custom assistants with instructions, conversation starters, knowledge files, and a recommended model. Templates are included.

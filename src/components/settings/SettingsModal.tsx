@@ -3,10 +3,10 @@
 import type { ReactNode } from "react";
 import { useApp, type SettingsTab } from "@/lib/client/store";
 import { cn } from "@/lib/client/utils";
-import { CloseIcon, CpuIcon, DatabaseIcon, HeadphonesIcon, KeyIcon, PaletteIcon, SettingsIcon, ShieldIcon, UserIcon, UsersIcon } from "../icons";
+import { BugIcon, CloseIcon, CpuIcon, DatabaseIcon, HeadphonesIcon, KeyIcon, PaletteIcon, SettingsIcon, ShieldIcon, UserIcon, UsersIcon } from "../icons";
 import { Modal } from "../ui";
 import { AccountTab, DataTab, GeneralTab, PersonalizationTab, SecurityTab } from "./UserTabs";
-import { KeysTab, ModelsTab, UsersTab, VoiceTab } from "./AdminTabs";
+import { ErrorsTab, KeysTab, ModelsTab, UsersTab, VoiceTab } from "./AdminTabs";
 
 const TABS: { id: SettingsTab; label: string; icon: ReactNode; admin?: boolean }[] = [
   { id: "general", label: "General", icon: <SettingsIcon size={18} /> },
@@ -18,6 +18,7 @@ const TABS: { id: SettingsTab; label: string; icon: ReactNode; admin?: boolean }
   { id: "models", label: "Models", icon: <CpuIcon size={18} />, admin: true },
   { id: "voice", label: "Voice", icon: <HeadphonesIcon size={18} />, admin: true },
   { id: "users", label: "People", icon: <UsersIcon size={18} />, admin: true },
+  { id: "errors", label: "Error logs", icon: <BugIcon size={18} />, admin: true },
 ];
 
 export function SettingsModal() {
@@ -47,6 +48,8 @@ export function SettingsModal() {
       <VoiceTab />
     ) : tab === "users" && isAdmin ? (
       <UsersTab />
+    ) : tab === "errors" && isAdmin ? (
+      <ErrorsTab />
     ) : null;
 
   return (

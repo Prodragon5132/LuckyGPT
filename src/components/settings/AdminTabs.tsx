@@ -7,7 +7,7 @@ import { cn } from "@/lib/client/utils";
 import type { ModelCapabilities, ProviderKind } from "@/lib/shared/types";
 import { Button, confirmDialog, inputClass, Modal, promptDialog, Select, Spinner, Toggle } from "../ui";
 import { Row, Section } from "./common";
-import { ChevronDown, ChevronLeft, ChevronRight, ExternalIcon, PlusIcon, SearchIcon, TrashIcon } from "../icons";
+import { ChevronDown, ChevronLeft, ChevronRight, DownloadIcon, ExternalIcon, PlusIcon, SearchIcon, TrashIcon } from "../icons";
 
 // ---------- Shared admin config state ----------
 
@@ -29,6 +29,7 @@ interface AppConfig {
   defaultModel: string | null;
   taskModel: string | null;
   visionHelper: string;
+  errorLogging: boolean;
   image: { provider: "none" | "openai" | "google" | "openrouter"; modelId: string };
   voice: {
     chatModel: string | null;
@@ -1030,6 +1031,126 @@ export function UsersTab() {
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+// ---------- Error logs ----------
+
+interface ErrorEntry {
+  id: string;
+  at: number;
+  source: string;
+  message: string;
+  kind?: string;
+  status?: number;
+  where?: string;
+  provider?: string;
+  model?: string;
+  stack?: string;
+}
+
+function errorText(e: ErrorEntry): string {
+  const meta = [e.kind, e.status && `HTTP ${e.status}`, e.provider, e.model, e.where].filter(Boolean).join(" · ");
+  return `[${new Date(e.at).toISOString()}] ${e.source}${meta ? ` (${meta})` : ""}\n  ${e.message}${e.stack ? `\n  ${e.stack.replace(/\n/g, "\n  ")}` : ""}`;
+}
+
+/** Anonymous error log: what broke and where, never who or what they were chatting about. */
+export function ErrorsTab() {
+  const { view, draft, save } = useAdminConfig();
+  const toast = useApp((s) => s.toast);
+  const [list, setList] = useState<ErrorEntry[] | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const load = useCallback(() => api<ErrorEntry[]>("/api/admin/errors").then(setList), []);
+  useEffect(() => {
+    let alive = true;
+    api<ErrorEntry[]>("/api/admin/errors")
+      .then((l) => alive && setList(l))
+      .catch(() => alive && setList([]));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!view || !draft || !list) return <Spinner size={18} />;
+  const all = list.map(errorText).join("\n\n");
+
+  return (
+    <div>
+      <p className="mb-4 text-sm text-fg-2">
+        When something breaks, LuckyGPT notes <b>what</b> went wrong (for example “OpenRouter returned 502” or a crash in the page), without any
+        chat text, names, emails, keys or ids. The log stays on your server. Copy or download it to share when asking for help or improvements.
+      </p>
+      <Section title="Settings">
+        <Row label="Keep an error log" description="Anonymous. Older entries are removed after 60 days.">
+          <Toggle checked={draft.errorLogging !== false} onChange={(errorLogging) => void save({ ...draft, errorLogging })} />
+        </Row>
+      </Section>
+      <Section title={`Recent errors (${list.length})`}>
+        <div className="flex flex-wrap gap-2 py-3">
+          <Button
+            size="sm"
+            disabled={!list.length}
+            onClick={() => navigator.clipboard.writeText(all).then(() => toast("Copied", "success"), () => toast("Couldn't copy", "error"))}
+          >
+            Copy all
+          </Button>
+          <Button
+            size="sm"
+            disabled={!list.length}
+            onClick={() => {
+              const url = URL.createObjectURL(new Blob([all], { type: "text/plain" }));
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `luckygpt-errors-${new Date().toISOString().slice(0, 10)}.txt`;
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}
+          >
+            <DownloadIcon size={16} /> Download
+          </Button>
+          <Button size="sm" onClick={() => void load().catch(() => {})}>
+            Refresh
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={!list.length}
+            onClick={async () => {
+              if (!(await confirmDialog({ title: "Clear the error log?", body: "This deletes all recorded errors.", confirmLabel: "Clear", danger: true }))) return;
+              await api("/api/admin/errors", { method: "DELETE" });
+              setList([]);
+            }}
+          >
+            Clear
+          </Button>
+        </div>
+        {list.length === 0 ? (
+          <p className="py-6 text-center text-sm text-fg-3">No errors recorded. 🎉</p>
+        ) : (
+          <ul className="divide-y divide-line-2">
+            {list.map((e) => (
+              <li key={e.id}>
+                <button className="w-full py-2.5 text-left" onClick={() => setOpen(open === e.id ? null : e.id)}>
+                  <div className="flex items-baseline justify-between gap-3 text-xs text-fg-3">
+                    <span className="font-medium text-fg-2">
+                      {e.source}
+                      {e.status ? ` · ${e.status}` : ""}
+                      {e.model ? ` · ${e.model}` : ""}
+                    </span>
+                    <span className="shrink-0 tabular-nums">{new Date(e.at).toLocaleString()}</span>
+                  </div>
+                  <div className={cn("mt-0.5 text-sm", open === e.id ? "whitespace-pre-wrap break-words" : "truncate")}>{e.message}</div>
+                  {open === e.id && (e.where || e.stack) && (
+                    <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted p-2 font-mono text-[11px] text-fg-2">
+                      {[e.where, e.stack].filter(Boolean).join("\n")}
+                    </pre>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
     </div>
   );
 }

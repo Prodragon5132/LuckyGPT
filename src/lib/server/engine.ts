@@ -39,6 +39,7 @@ import { loadUserInfo, type SessionUser } from "./auth";
 import { HttpError, badRequest } from "./http";
 import { newId } from "./crypto";
 import { OPENROUTER_USAGE_KEY, recordHit } from "./ratelimit";
+import { logError } from "./errorlog";
 import type {
   Activity,
   Attachment,
@@ -172,7 +173,12 @@ async function loadAttachments(userId: string, ids: string[] | undefined): Promi
 const RICH_WINDOW = 6; // only the latest user turns carry full images/PDFs (keeps cost down)
 
 /** Describes an image for a chat model that can't see. Returns "" if the helper fails. */
-type DescribeImage = (file: { id: string; name: string; mime: string; data: Buffer }, question: string) => Promise<string>;
+type DescribeImage = (
+  file: { id: string; name: string; mime: string; data: Buffer },
+  question: string,
+  /** askOnly: answer a specific question (from look_at_image) instead of making the saved description. */
+  opts?: { askOnly?: boolean },
+) => Promise<string>;
 
 const DESCRIBE_PROMPT = `Describe this image in detail for an AI assistant that can't see it, so it can answer questions about it.
 Include: what it shows, people/objects and their positions, colors, setting, any charts/diagrams (with their values),
@@ -186,8 +192,13 @@ function makeDescriber(ctx: {
   body: MessageBody;
   signal: AbortSignal;
 }): DescribeImage {
-  return async (file, question) => {
-    const activity: Activity = { id: `vision-${file.id}`, kind: "image", label: "Looking at image", status: "running" };
+  return async (file, question, opts = {}) => {
+    const activity: Activity = { id: `vision-${file.id}${opts.askOnly ? `-${newId().slice(0, 6)}` : ""}`, kind: "image", label: "Looking at image", status: "running" };
+    const prompt = opts.askOnly
+      ? `${DESCRIBE_PROMPT}\n\nMost importantly, answer this question about the image: ${question.slice(0, 1000)}`
+      : question
+        ? `${DESCRIBE_PROMPT}\n\nThe user's message (focus on what's relevant to it): ${question.slice(0, 1000)}`
+        : DESCRIBE_PROMPT;
     const show = (a: Activity) => {
       ctx.body.activity = [...(ctx.body.activity ?? []).filter((x) => x.id !== a.id), a];
       ctx.send({ type: "activity", activity: a });
@@ -200,7 +211,7 @@ function makeDescriber(ctx: {
           {
             role: "user",
             content: [
-              { type: "text", text: question ? `${DESCRIBE_PROMPT}\n\nThe user's message (focus on what's relevant to it): ${question.slice(0, 1000)}` : DESCRIBE_PROMPT },
+              { type: "text", text: prompt },
               { type: "image", image: file.data, mediaType: file.mime },
             ],
           },
@@ -211,11 +222,14 @@ function makeDescriber(ctx: {
         maxRetries: 2, // 3 attempts
       });
       const desc = text.trim();
-      if (desc) await setFileText(ctx.userId, file.id, desc).catch(() => {});
+      if (desc && !opts.askOnly) await setFileText(ctx.userId, file.id, desc).catch(() => {});
       show({ ...activity, label: "Looked at image", status: "done" });
       return desc;
     } catch (err) {
-      if (!ctx.signal.aborted) console.warn("[chat] image helper failed", err);
+      if (!ctx.signal.aborted) {
+        console.warn("[chat] image helper failed", err);
+        void logError("image-helper", err, { provider: ctx.helper.provider, model: ctx.helper.modelId });
+      }
       show({ ...activity, label: voiceErrorMessage(err, `Couldn't read image with ${ctx.helper.modelId}`).slice(0, 160), status: "error" });
       return "";
     }
@@ -261,7 +275,7 @@ async function toModelMessages(
             type: "text",
             text: desc
               ? `[Image "${file.info.name}", described for you by an image-understanding model because you can't see images directly. Answer naturally as if you can see it:\n${desc}\n]`
-              : `[The user attached an image "${file.info.name}", but it couldn't be read right now. Say so if they ask about it.]`,
+              : `[The user attached an image "${file.info.name}", but it couldn't be read automatically. If you have the look_at_image tool, use it; otherwise say so if they ask about it.]`,
           });
         } else {
           content.push({
@@ -481,6 +495,7 @@ export async function runChat(user: SessionUser, req: ChatRequest, signal: Abort
               // The action worked even though the model's follow-up failed: don't call the whole reply a failure.
               if (done.length && !body.text.trim()) {
                 console.warn("[chat] reply failed after tools ran; confirming instead:", err instanceof Error ? err.message : err);
+                void logError("chat (after tool)", err, { provider: cfg.provider, model: cfg.modelId });
                 body.text = doneFallbackText(done);
                 send({ type: "text", delta: body.text });
                 break;
@@ -488,6 +503,7 @@ export async function runChat(user: SessionUser, req: ChatRequest, signal: Abort
               throw err;
             }
             console.warn(`[chat] attempt ${attempt} failed, retrying:`, err instanceof Error ? err.message : err);
+            void logError(`chat (retried ${attempt})`, err, { provider: cfg.provider, model: cfg.modelId });
             for (const key of Object.keys(body) as (keyof MessageBody)[]) if (key !== "voice") delete body[key];
             body.text = "";
             send({ type: "reset" });
@@ -515,6 +531,7 @@ export async function runChat(user: SessionUser, req: ChatRequest, signal: Abort
           status = "stopped";
         } else {
           console.error("[chat] generation error", err);
+          void logError("chat", err, { provider: cfg.provider, model: cfg.modelId });
           status = "error";
           body.error = friendlyError(err, cfg);
           send({ type: "error", message: body.error });
@@ -540,6 +557,7 @@ export async function runChat(user: SessionUser, req: ChatRequest, signal: Abort
           }
         } catch (err) {
           console.warn("[chat] title generation failed", (err as Error).message);
+          void logError("chat title", err);
         }
       }
 
@@ -592,6 +610,20 @@ async function generate(ctx: {
 
   const memoryEnabled = ctx.prefs.memoryEnabled && !ctx.temporary && !ctx.gpt && cfg.capabilities.tools;
   const memories = ctx.prefs.memoryEnabled && !ctx.temporary ? await listMemories(user.id) : [];
+  // Images in this conversation, oldest first, for the look_at_image fallback tool.
+  const convImages: { id: string; name: string; from: "user" | "assistant" }[] = [];
+  for (const h of ctx.history) {
+    for (const a of h.role === "user" ? h.attachments : (h.images ?? [])) {
+      if (a.mime.startsWith("image/")) convImages.push({ id: a.id, name: a.name, from: h.role === "user" ? "user" : "assistant" });
+    }
+  }
+  convImages.splice(0, Math.max(0, convImages.length - 20));
+  const helperForTool = resolveVisionHelper(config, secrets);
+  // Only when a separate image-understanding model exists (not the chat model itself).
+  const imageHelper =
+    helperForTool && !(helperForTool.provider === cfg.provider && helperForTool.modelId === cfg.modelId && helperForTool.customId === cfg.customId)
+      ? helperForTool
+      : null;
   // Searching past chats (like ChatGPT's "Reference chat history"). Off in temporary chats.
   const chatSearchEnabled = ctx.prefs.chatHistoryEnabled !== false && !ctx.temporary && cfg.capabilities.tools;
 
@@ -640,6 +672,32 @@ async function generate(ctx: {
           const activity = showActivity({ id: newId(), kind: "memory", label: "Updated saved memory", status: "done" });
           done.push({ kind: "memory", note: `Deleted the memory "${match.content.slice(0, 200)}"`, activity });
           return { deleted: true, next: "Memory deleted. Now reply to the user normally." };
+        },
+      });
+    }
+    // Fallback: let the model ask the image-understanding model itself, in case the automatic
+    // description didn't happen (older images, a failed attempt, or a model that can't really see).
+    if (imageHelper && convImages.length) {
+      const listing = convImages.map((im, i) => `${i + 1}. ${im.name} (${im.from === "user" ? "sent by the user" : "made by you"})`).join("; ");
+      functionTools.look_at_image = tool({
+        description:
+          `Look at an image from this conversation with an image-understanding model and get a description or an answer. ` +
+          `Only use this if you can't see the image yourself and no description of it was given. Images: ${listing}.`.slice(0, 1500),
+        inputSchema: z.object({
+          image: z.number().int().describe("The image's number from the list (the last one is the most recent)"),
+          question: z.string().describe("What you want to know about the image, e.g. 'What does the sign say?'"),
+        }),
+        execute: async ({ image, question }) => {
+          const im = convImages[Math.min(Math.max(1, image), convImages.length) - 1];
+          let file;
+          try {
+            file = await getFileData(user.id, im.id);
+          } catch {
+            return { error: "That image is no longer available." };
+          }
+          const describeFor = makeDescriber({ userId: user.id, helper: imageHelper, secrets, send, body, signal });
+          const answer = await describeFor({ id: file.info.id, name: file.info.name, mime: file.info.mime, data: file.data }, question, { askOnly: true });
+          return answer ? { image: im.name, description: answer } : { error: "The image-understanding model couldn't read this image right now." };
         },
       });
     }
@@ -839,6 +897,7 @@ async function generate(ctx: {
         const a = activities.get(part.toolCallId);
         if (a) setActivity({ ...a, status: "error", label: a.kind === "image" ? "Image creation failed" : "Tool failed" });
         console.warn("[chat] tool error", part.toolName, part.error);
+        void logError(`tool: ${part.toolName}`, part.error, { provider: cfg.provider, model: cfg.modelId });
         break;
       }
       case "file":

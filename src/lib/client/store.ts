@@ -37,7 +37,8 @@ export type SettingsTab =
   | "keys"
   | "models"
   | "voice"
-  | "users";
+  | "users"
+  | "errors";
 
 export interface Toast {
   id: number;

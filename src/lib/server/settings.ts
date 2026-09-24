@@ -54,6 +54,8 @@ export interface AppConfig {
    * can see), "off", the id of a configured vision model, or "openrouter:<model id>".
    */
   visionHelper: string;
+  /** Keep a private, anonymous error log (Admin → Error logs). */
+  errorLogging: boolean;
   image: { provider: "none" | "openai" | "google" | "openrouter"; modelId: string };
   voice: {
     chatModel: string | null;
@@ -69,6 +71,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   defaultModel: null,
   taskModel: null,
   visionHelper: "",
+  errorLogging: true,
   image: { provider: "none", modelId: "" },
   voice: {
     chatModel: null,

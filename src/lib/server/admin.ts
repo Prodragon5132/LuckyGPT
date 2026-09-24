@@ -48,6 +48,7 @@ export const appConfigSchema = z.object({
       elevenVoices: z.string().max(4000),
     }),
   }),
+  errorLogging: z.boolean().default(true),
   webSearch: z.enum(["auto", "manual"]),
   maxOutputTokens: z.number().int().min(256).max(200_000),
 });
