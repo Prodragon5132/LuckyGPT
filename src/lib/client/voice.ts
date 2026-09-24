@@ -159,6 +159,9 @@ export async function transcribeBlob(blob: Blob, signal?: AbortSignal): Promise<
 
 const SERVER_STT_HINT = "An admin can switch Settings → Voice → Speech to text to OpenRouter, OpenAI or Groq so it works everywhere.";
 
+/** Errors that won't fix themselves by retrying, so voice mode stops and explains instead of looping. */
+export const FATAL_STT_ERRORS = new Set(["not-allowed", "service-not-allowed", "network", "audio-capture", "language-not-supported"]);
+
 function browserSttError(code: string): string {
   switch (code) {
     case "not-allowed":
@@ -199,7 +202,8 @@ export function createRecognizer(opts: {
   continuous?: boolean;
   onText: (finalText: string, interim: string) => void;
   onEnd?: () => void;
-  onError?: (msg: string) => void;
+  /** code is the browser's error code, e.g. "network" or "not-allowed". */
+  onError?: (msg: string, code: string) => void;
 }): SpeechRecognitionLike | null {
   const w = window as unknown as Record<string, new () => SpeechRecognitionLike>;
   const Ctor = w.SpeechRecognition || w.webkitSpeechRecognition;
@@ -220,7 +224,7 @@ export function createRecognizer(opts: {
   };
   r.onerror = (e) => {
     if (e.error === "no-speech" || e.error === "aborted") return;
-    opts.onError?.(browserSttError(e.error));
+    opts.onError?.(browserSttError(e.error), e.error);
   };
   r.onend = () => opts.onEnd?.();
   return r;

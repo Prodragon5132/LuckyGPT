@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/client/store";
 import { sendMessage, stopStreaming } from "@/lib/client/chat-client";
 import {
+  FATAL_STT_ERRORS,
   browserSttSupported,
   createRecognizer,
   fetchSpeech,
@@ -41,8 +42,11 @@ function takeSentences(buffer: string, force: boolean): { sentences: string[]; r
 
 export function VoiceMode() {
   const open = useApp((s) => s.voiceOpen);
+  const voiceCfg = useApp((s) => s.voiceCfg);
   if (!open) return null;
-  return <VoiceSession />;
+  // If the voice settings arrive after voice mode opened (e.g. tapped right after page load),
+  // restart the session so it uses the right speech-to-text / text-to-speech.
+  return <VoiceSession key={`${voiceCfg.stt}:${voiceCfg.tts}`} />;
 }
 
 function VoiceSession() {
@@ -53,8 +57,9 @@ function VoiceSession() {
   const [phase, setPhase] = useState<Phase>("starting");
   const [muted, setMuted] = useState(false);
   const [captions, setCaptions] = useState(true);
+  // Captions: the conversation so far (you on the right, LuckyGPT on the left) + what's being heard right now.
+  const [turns, setTurns] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
   const [heard, setHeard] = useState("");
-  const [said, setSaid] = useState("");
   const [error, setError] = useState("");
   const [level, setLevel] = useState(0);
 
@@ -68,6 +73,9 @@ function VoiceSession() {
   const speakAbort = useRef<AbortController | null>(null);
   const closedRef = useRef(false);
   const recognizerRef = useRef<ReturnType<typeof createRecognizer>>(null);
+  // Set when the person taps the orb to send what they said right away.
+  const forceEndRef = useRef(false);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   // Browser speech recognition restarts itself after each reply; kept in a ref to avoid a circular dependency.
   const listenRef = useRef<() => void>(() => {});
 
@@ -131,7 +139,12 @@ function VoiceSession() {
         continue;
       }
       if (phaseRef.current !== "speaking") setP("speaking");
-      setSaid((s) => (s ? `${s} ${cur.text}` : cur.text));
+      setTurns((t) => {
+        const last = t[t.length - 1];
+        return last?.role === "assistant"
+          ? [...t.slice(0, -1), { role: "assistant", text: `${last.text} ${cur.text}` }]
+          : [...t, { role: "assistant", text: cur.text }];
+      });
       if (useServerTts) {
         const blob = await cur.audio;
         if (abort.signal.aborted) break;
@@ -160,8 +173,8 @@ function VoiceSession() {
         setP("listening");
         return;
       }
-      setHeard(text);
-      setSaid("");
+      setHeard("");
+      setTurns((t) => [...t, { role: "user", text: text.trim() }]);
       setP("thinking");
       const st = useApp.getState();
       const session = st.session(keyRef.current);
@@ -217,20 +230,36 @@ function VoiceSession() {
   // ---------- browser speech recognition path ----------
   const startBrowserListening = useCallback(() => {
     if (closedRef.current || mutedRef.current) return;
+    // Only one recognizer may run: starting a second one makes the browser abort the first,
+    // and two of them restarting each other would leave voice mode stuck on "Listening".
+    const previous = recognizerRef.current;
+    recognizerRef.current = null;
+    previous?.abort();
     let finalText = "";
+    let fatal = false;
     const r = createRecognizer({
       lang: prefs?.spokenLanguage,
       continuous: false,
       onText: (f, interim) => {
+        if (recognizerRef.current !== r) return;
         finalText = f;
         setHeard(f + interim);
         if (phaseRef.current === "listening") setP("hearing");
       },
-      onError: (m) => setError(m),
+      onError: (m, code) => {
+        if (recognizerRef.current !== r) return;
+        if (FATAL_STT_ERRORS.has(code)) fatal = true;
+        setError(m);
+      },
       onEnd: () => {
-        if (closedRef.current) return;
-        if (finalText.trim()) void respond(finalText.trim());
+        if (closedRef.current || recognizerRef.current !== r) return; // replaced or closed
+        recognizerRef.current = null;
+        if (fatal) {
+          setHeard("");
+          setP("error");
+        } else if (finalText.trim()) void respond(finalText.trim());
         else if (phaseRef.current === "listening" || phaseRef.current === "hearing") {
+          setHeard("");
           setP("listening");
           setTimeout(() => listenRef.current(), 150);
         }
@@ -250,6 +279,9 @@ function VoiceSession() {
 
   // ---------- setup & VAD loop ----------
   useEffect(() => {
+    // `alive` belongs to this mount only. In development React mounts twice; a stale first mount
+    // must never start a second microphone/recognizer session alongside the real one.
+    let alive = true;
     closedRef.current = false;
     let raf = 0;
     let noiseFloor = 0.01;
@@ -260,7 +292,15 @@ function VoiceSession() {
     let recorderStarted = 0;
     let last = performance.now();
 
+    const restartListening = () => {
+      setHeard("");
+      setP("listening");
+      startRecorder();
+      recorderStarted = performance.now();
+    };
+
     const loop = async () => {
+      if (!alive) return;
       const now = performance.now();
       const dt = now - last;
       last = now;
@@ -273,10 +313,13 @@ function VoiceSession() {
       } else if (p === "listening") {
         noiseFloor = noiseFloor * 0.995 + Math.min(lvl, noiseFloor * 2) * 0.005;
       }
-      const threshold = Math.max(0.018, noiseFloor * 3);
+      const threshold = Math.max(0.012, noiseFloor * 2.5);
 
       if (!mutedRef.current && useServerStt) {
-        if (p === "listening") {
+        // Tapping the orb sends what was said right away.
+        const force = forceEndRef.current && (p === "listening" || p === "hearing");
+        forceEndRef.current = false;
+        if (p === "listening" && !force) {
           if (lvl > threshold) speechMs += dt;
           else speechMs = Math.max(0, speechMs - dt);
           if (speechMs > 120) {
@@ -289,27 +332,23 @@ function VoiceSession() {
             startRecorder();
             recorderStarted = now;
           }
-        } else if (p === "hearing") {
+        } else if (p === "hearing" || force) {
           if (lvl < threshold * 0.8) silenceMs += dt;
           else silenceMs = 0;
-          if (silenceMs > 900 || now - hearingSince > 45_000) {
+          if (force || silenceMs > 900 || now - hearingSince > 45_000) {
             speechMs = 0;
             setP("thinking");
+            setHeard("…");
             const blob = await stopRecorder();
             try {
               const text = await transcribeBlob(blob);
-              if (text && text.replace(/[^\p{L}\p{N}]/gu, "").length > 1) {
-                void respond(text);
-              } else {
-                setP("listening");
-                startRecorder();
-                recorderStarted = performance.now();
-              }
+              if (!alive) return;
+              if (text && text.replace(/[^\p{L}\p{N}]/gu, "").length > 1) void respond(text);
+              else restartListening();
             } catch (e) {
+              if (!alive) return;
               setError((e as Error).message);
-              setP("listening");
-              startRecorder();
-              recorderStarted = performance.now();
+              restartListening();
             }
           }
         } else if (p === "speaking") {
@@ -327,7 +366,7 @@ function VoiceSession() {
           }
         }
       }
-      if (!closedRef.current) raf = requestAnimationFrame(() => void loop());
+      if (alive) raf = requestAnimationFrame(() => void loop());
     };
 
     (async () => {
@@ -336,7 +375,7 @@ function VoiceSession() {
           throw new Error("Voice mode needs speech recognition. Use Chrome, Edge or Safari, or ask your admin to set up a speech-to-text provider.");
         }
         const stream = await getMic();
-        if (closedRef.current) {
+        if (!alive) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
@@ -351,23 +390,32 @@ function VoiceSession() {
         }
         raf = requestAnimationFrame(() => void loop());
       } catch (e) {
+        if (!alive) return;
         setError((e as Error).message);
         setP("error");
       }
     })();
 
     return () => {
+      alive = false;
       closedRef.current = true;
       cancelAnimationFrame(raf);
       speakAbort.current?.abort();
       stopSpeaking();
-      recognizerRef.current?.abort();
+      const r = recognizerRef.current;
+      recognizerRef.current = null;
+      r?.abort();
       if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop();
       meterRef.current?.close();
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, heard, captions]);
 
   const close = () => {
     interrupt();
@@ -395,11 +443,12 @@ function VoiceSession() {
           : phase === "listening"
             ? "Listening"
             : phase === "hearing"
-              ? "Listening"
+              ? "Listening · tap to send"
               : phase === "thinking"
                 ? "Thinking"
                 : "Tap to interrupt";
 
+  const showTranscript = captions && (turns.length > 0 || !!heard);
   const scale = phase === "hearing" || phase === "listening" ? 1 + Math.min(0.25, level * 4) : phase === "speaking" ? 1.06 : 1;
 
   return (
@@ -409,17 +458,26 @@ function VoiceSession() {
           <span className="text-sm text-fg-3">{useServerTts ? "Voice mode" : "Voice mode · browser voice"}</span>
           <span />
         </div>
-        <div className="flex flex-1 flex-col items-center justify-center gap-8 px-6">
+        <div className={cn("flex min-h-0 w-full flex-1 flex-col items-center gap-6 px-6", showTranscript ? "pt-2" : "justify-center")}>
           <button
             onClick={() => {
-              if (phaseRef.current === "speaking" || phaseRef.current === "thinking") {
+              const p = phaseRef.current;
+              if (p === "speaking" || p === "thinking") {
                 interrupt();
+                setHeard("");
                 setP("listening");
                 if (useServerStt) startRecorder();
                 else listenRef.current();
+              } else if (p === "listening" || p === "hearing") {
+                // Send what was said now instead of waiting for a pause.
+                if (useServerStt) forceEndRef.current = true;
+                else recognizerRef.current?.stop();
               }
             }}
-            className="relative h-56 w-56 rounded-full transition-transform duration-150 sm:h-64 sm:w-64"
+            className={cn(
+              "relative shrink-0 rounded-full transition-[transform,width,height] duration-200",
+              showTranscript ? "h-32 w-32 sm:h-40 sm:w-40" : "h-56 w-56 sm:h-64 sm:w-64",
+            )}
             style={{ transform: `scale(${scale})` }}
             aria-label={status}
           >
@@ -430,10 +488,26 @@ function VoiceSession() {
             <div className={cn("text-lg font-medium", (phase === "thinking" || phase === "starting") && "shimmer")}>{status}</div>
             {error && <div className="mt-2 max-w-sm text-sm text-danger">{error}</div>}
           </div>
-          {captions && (heard || said) && (
-            <div className="max-h-40 w-full max-w-xl overflow-y-auto text-center text-sm leading-6 scroll-thin">
-              {heard && <p className="text-fg-3">“{heard}”</p>}
-              {said && <p className="mt-2 text-fg-2">{said}</p>}
+          {showTranscript && (
+            <div ref={transcriptRef} className="scroll-thin min-h-0 w-full max-w-2xl flex-1 overflow-y-auto" aria-live="polite">
+              <div className="flex flex-col gap-3 pb-2">
+                {turns.map((t, i) =>
+                  t.role === "user" ? (
+                    <div key={i} data-turn="user" className="flex justify-end">
+                      <div className="max-w-[80%] whitespace-pre-wrap rounded-3xl bg-bubble px-4 py-2 text-[15px] leading-6">{t.text}</div>
+                    </div>
+                  ) : (
+                    <div key={i} data-turn="assistant" className="flex justify-start">
+                      <div className="max-w-[90%] text-[15px] leading-7">{t.text}</div>
+                    </div>
+                  ),
+                )}
+                {heard && (
+                  <div data-turn="user-live" className="flex justify-end">
+                    <div className="max-w-[80%] rounded-3xl bg-bubble px-4 py-2 text-[15px] leading-6 text-fg-2 opacity-80">{heard}</div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
