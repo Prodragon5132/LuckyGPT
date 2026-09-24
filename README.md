@@ -93,7 +93,8 @@ You'll end up with a link like `https://luckygpt-yourname.vercel.app` that your 
    - Google Gemini: <https://aistudio.google.com/apikey>
    - OpenRouter: <https://openrouter.ai/keys>
 2. A few good models are added automatically. Change them in **Settings → Models**: **Add models** browses everything your key can use, and **Test** checks that a model works.
-3. Optional: in **Settings → Voice**, pick the speech-to-text and text-to-speech providers and a small, fast model for voice chats.
+3. Optional: in **Settings → Voice**, pick the speech-to-text and text-to-speech providers (OpenAI, Google, OpenRouter, or ElevenLabs) and a small, fast model for voice chats.
+4. Optional: add a second OpenRouter key under **OpenRouter — chat only**. Chat then bills to that key, while voice and images keep using the main OpenRouter key.
 
 ### 6. Give your dad an account
 

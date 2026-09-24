@@ -5,6 +5,7 @@ import {
   getSecrets,
   guessCapabilities,
   maskKey,
+  maskedKeys,
   saveConfig,
   saveSecrets,
   SUGGESTED_MODELS,
@@ -12,15 +13,17 @@ import {
 } from "@/lib/server/settings";
 import { newId } from "@/lib/server/crypto";
 
+const keyProvider = z.enum(["openai", "anthropic", "google", "openrouter", "openrouterChat", "groq", "elevenlabs"]);
+
 const schema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("set"),
-    provider: z.enum(["openai", "anthropic", "google", "openrouter", "groq", "elevenlabs"]),
+    provider: keyProvider,
     apiKey: z.string().trim().min(8).max(500),
   }),
   z.object({
     action: z.literal("remove"),
-    provider: z.enum(["openai", "anthropic", "google", "openrouter", "groq", "elevenlabs"]),
+    provider: keyProvider,
   }),
   z.object({
     action: z.literal("addCustom"),
@@ -42,8 +45,9 @@ export const PUT = handler(
       if (/\s/.test(body.apiKey)) throw badRequest("API keys can't contain spaces.");
       secrets[body.provider] = { apiKey: body.apiKey };
       // First key for a chat provider? Add a few good default models so it works right away.
-      if (body.provider in SUGGESTED_MODELS && !config.models.some((m) => m.provider === body.provider)) {
-        const provider = body.provider as keyof typeof SUGGESTED_MODELS;
+      const chatProvider = body.provider === "openrouterChat" ? "openrouter" : body.provider;
+      if (chatProvider in SUGGESTED_MODELS && !config.models.some((m) => m.provider === chatProvider)) {
+        const provider = chatProvider as keyof typeof SUGGESTED_MODELS;
         for (const s of SUGGESTED_MODELS[provider]) {
           const m: ModelConfig = {
             id: `${provider}:${s.modelId}`,
@@ -87,14 +91,7 @@ export const PUT = handler(
     return json({
       ok: true,
       addedModels,
-      keys: {
-        openai: maskKey(secrets.openai?.apiKey),
-        anthropic: maskKey(secrets.anthropic?.apiKey),
-        google: maskKey(secrets.google?.apiKey),
-        openrouter: maskKey(secrets.openrouter?.apiKey),
-        groq: maskKey(secrets.groq?.apiKey),
-        elevenlabs: maskKey(secrets.elevenlabs?.apiKey),
-      },
+      keys: maskedKeys(secrets),
       custom: (secrets.custom ?? []).map((c) => ({ id: c.id, name: c.name, baseURL: c.baseURL, key: maskKey(c.apiKey) })),
       config,
     });

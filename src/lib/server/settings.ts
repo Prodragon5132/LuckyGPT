@@ -9,7 +9,7 @@ import type { ModelCapabilities, ProviderKind } from "@/lib/shared/types";
  * sent back to the browser (only "set / not set" and the last 4 characters).
  */
 
-export type SecretProvider = "openai" | "anthropic" | "google" | "openrouter" | "groq" | "elevenlabs";
+export type SecretProvider = "openai" | "anthropic" | "google" | "openrouter" | "openrouterChat" | "groq" | "elevenlabs";
 
 export interface CustomEndpoint {
   id: string;
@@ -23,6 +23,8 @@ export interface ProviderSecrets {
   anthropic?: { apiKey: string };
   google?: { apiKey: string };
   openrouter?: { apiKey: string };
+  /** Optional second OpenRouter key used only for chat models (voice and images use the main one). */
+  openrouterChat?: { apiKey: string };
   groq?: { apiKey: string };
   elevenlabs?: { apiKey: string };
   custom?: CustomEndpoint[];
@@ -40,7 +42,7 @@ export interface ModelConfig {
 }
 
 export type SttProvider = "browser" | "openai" | "groq" | "google" | "elevenlabs";
-export type TtsProvider = "browser" | "openai" | "google" | "elevenlabs";
+export type TtsProvider = "browser" | "openai" | "google" | "openrouter" | "elevenlabs";
 
 export interface AppConfig {
   models: ModelConfig[];
@@ -115,6 +117,19 @@ export async function saveConfig(config: AppConfig): Promise<void> {
 export function maskKey(key: string | undefined): string | null {
   if (!key) return null;
   return key.length <= 8 ? "••••" : `••••${key.slice(-4)}`;
+}
+
+/** "set / not set" plus the last 4 characters for each key — the only thing the browser ever sees. */
+export function maskedKeys(secrets: ProviderSecrets): Record<SecretProvider, string | null> {
+  return {
+    openai: maskKey(secrets.openai?.apiKey),
+    anthropic: maskKey(secrets.anthropic?.apiKey),
+    google: maskKey(secrets.google?.apiKey),
+    openrouter: maskKey(secrets.openrouter?.apiKey),
+    openrouterChat: maskKey(secrets.openrouterChat?.apiKey),
+    groq: maskKey(secrets.groq?.apiKey),
+    elevenlabs: maskKey(secrets.elevenlabs?.apiKey),
+  };
 }
 
 export function providerLabel(provider: ProviderKind, custom?: CustomEndpoint): string {

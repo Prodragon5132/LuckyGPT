@@ -36,7 +36,7 @@ export const appConfigSchema = z.object({
     chatModel: z.string().max(100).nullable(),
     stt: z.object({ provider: z.enum(["browser", "openai", "groq", "google", "elevenlabs"]), model: z.string().max(200) }),
     tts: z.object({
-      provider: z.enum(["browser", "openai", "google", "elevenlabs"]),
+      provider: z.enum(["browser", "openai", "google", "openrouter", "elevenlabs"]),
       model: z.string().max(200),
       defaultVoice: z.string().max(100),
       elevenVoices: z.string().max(4000),

@@ -11,7 +11,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, ExternalIcon, PlusIcon, SearchI
 
 // ---------- Shared admin config state ----------
 
-type SecretProvider = "openai" | "anthropic" | "google" | "openrouter" | "groq" | "elevenlabs";
+type SecretProvider = "openai" | "anthropic" | "google" | "openrouter" | "openrouterChat" | "groq" | "elevenlabs";
 
 interface ModelConfig {
   id: string;
@@ -32,7 +32,7 @@ interface AppConfig {
   voice: {
     chatModel: string | null;
     stt: { provider: "browser" | "openai" | "groq" | "google" | "elevenlabs"; model: string };
-    tts: { provider: "browser" | "openai" | "google" | "elevenlabs"; model: string; defaultVoice: string; elevenVoices: string };
+    tts: { provider: "browser" | "openai" | "google" | "openrouter" | "elevenlabs"; model: string; defaultVoice: string; elevenVoices: string };
   };
   webSearch: "auto" | "manual";
   maxOutputTokens: number;
@@ -116,7 +116,14 @@ const PROVIDERS: { id: SecretProvider; name: string; blurb: string; url: string;
   { id: "openai", name: "OpenAI", blurb: "GPT models, image generation, and natural voices.", url: "https://platform.openai.com/api-keys", placeholder: "sk-..." },
   { id: "anthropic", name: "Anthropic", blurb: "Claude models.", url: "https://console.anthropic.com/settings/keys", placeholder: "sk-ant-..." },
   { id: "google", name: "Google Gemini", blurb: "Gemini models and image generation. Has a free tier.", url: "https://aistudio.google.com/apikey", placeholder: "AIza..." },
-  { id: "openrouter", name: "OpenRouter", blurb: "Hundreds of models with one key, including some free ones.", url: "https://openrouter.ai/keys", placeholder: "sk-or-..." },
+  { id: "openrouter", name: "OpenRouter", blurb: "Hundreds of models with one key, including some free ones. Also voices and images.", url: "https://openrouter.ai/keys", placeholder: "sk-or-..." },
+  {
+    id: "openrouterChat",
+    name: "OpenRouter — chat only (optional)",
+    blurb: "A second OpenRouter key used only for chat. Voice and images keep using the main OpenRouter key.",
+    url: "https://openrouter.ai/keys",
+    placeholder: "sk-or-...",
+  },
   { id: "groq", name: "Groq", blurb: "Very fast speech-to-text for voice (has a free tier).", url: "https://console.groq.com/keys", placeholder: "gsk_..." },
   { id: "elevenlabs", name: "ElevenLabs", blurb: "Very natural text-to-speech voices.", url: "https://elevenlabs.io/app/settings/api-keys", placeholder: "sk_..." },
 ];
@@ -627,6 +634,7 @@ const STT_DEFAULTS: Record<string, string> = {
 const TTS_DEFAULTS: Record<string, string> = {
   openai: "gpt-4o-mini-tts",
   google: "gemini-3.1-flash-tts-preview",
+  openrouter: "google/gemini-3.1-flash-tts-preview",
   elevenlabs: "eleven_flash_v2_5",
 };
 const OPENAI_VOICES = ["alloy", "ash", "ballad", "cedar", "coral", "echo", "fable", "marin", "nova", "onyx", "sage", "shimmer", "verse"];
@@ -638,7 +646,9 @@ export function VoiceTab() {
   const v = draft.voice;
   const setV = (patch: Partial<AppConfig["voice"]>) => setDraft({ ...draft, voice: { ...v, ...patch } });
   const keyMissing = (p: string) => p !== "browser" && !view.keys[p as SecretProvider];
-  const voiceOptions = v.tts.provider === "openai" ? OPENAI_VOICES : v.tts.provider === "google" ? GEMINI_VOICES : [];
+  // OpenRouter voices depend on the model family (openai/… or google/…); other models take a typed voice name.
+  const ttsFamily = v.tts.provider === "openrouter" ? v.tts.model.split("/")[0].toLowerCase() : v.tts.provider;
+  const voiceOptions = ttsFamily === "openai" ? OPENAI_VOICES : ttsFamily === "google" ? GEMINI_VOICES : [];
 
   return (
     <div>
@@ -686,7 +696,7 @@ export function VoiceTab() {
                   ...v.tts,
                   provider,
                   model: TTS_DEFAULTS[provider] ?? "",
-                  defaultVoice: provider === "openai" ? "marin" : provider === "google" ? "Kore" : "",
+                  defaultVoice: provider === "openai" ? "marin" : provider === "google" || provider === "openrouter" ? "Kore" : "",
                 },
               })
             }
@@ -694,16 +704,34 @@ export function VoiceTab() {
               { value: "browser", label: "Browser (free)" },
               { value: "openai", label: "OpenAI" },
               { value: "google", label: "Google" },
+              { value: "openrouter", label: "OpenRouter" },
               { value: "elevenlabs", label: "ElevenLabs" },
             ]}
           />
         </Row>
         {v.tts.provider !== "browser" && (
           <>
-            <Row label="Model" description={keyMissing(v.tts.provider) ? <span className="text-danger">Add this provider&apos;s API key first.</span> : undefined}>
+            <Row
+              label="Model"
+              description={
+                keyMissing(v.tts.provider) ? (
+                  <span className="text-danger">Add this provider&apos;s API key first.</span>
+                ) : v.tts.provider === "openrouter" ? (
+                  "Any OpenRouter text-to-speech model, e.g. google/gemini-3.1-flash-tts-preview or openai/gpt-4o-mini-tts."
+                ) : undefined
+              }
+            >
               <input className={cn(inputClass, "w-56 py-1.5 font-mono")} value={v.tts.model} onChange={(e) => setV({ tts: { ...v.tts, model: e.target.value } })} />
             </Row>
-            {v.tts.provider === "elevenlabs" ? (
+            {v.tts.provider === "openrouter" && !voiceOptions.length ? (
+              <Row label="Voice" description="The voice name this model uses (see the model's page on OpenRouter).">
+                <input
+                  className={cn(inputClass, "w-56 py-1.5 font-mono")}
+                  value={v.tts.defaultVoice}
+                  onChange={(e) => setV({ tts: { ...v.tts, defaultVoice: e.target.value } })}
+                />
+              </Row>
+            ) : v.tts.provider === "elevenlabs" ? (
               <div className="py-3">
                 <div className="mb-1.5 text-sm">Voices</div>
                 <textarea

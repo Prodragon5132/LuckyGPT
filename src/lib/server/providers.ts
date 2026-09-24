@@ -40,7 +40,7 @@ export function languageModel(cfg: ModelConfig, secrets: ProviderSecrets, opts: 
       return createGoogleGenerativeAI({ apiKey: key })(cfg.modelId);
     }
     case "openrouter": {
-      const key = secrets.openrouter?.apiKey || missingKey("OpenRouter");
+      const key = secrets.openrouterChat?.apiKey || secrets.openrouter?.apiKey || missingKey("OpenRouter");
       const provider = createOpenRouter({ apiKey: key, appName: "LuckyGPT" } as Parameters<typeof createOpenRouter>[0]);
       return provider(cfg.modelId, opts.webSearch ? { extraBody: { plugins: [{ id: "web" }] } } : undefined);
     }
@@ -172,6 +172,8 @@ export function isProviderReady(cfg: ModelConfig, secrets: ProviderSecrets): boo
   switch (cfg.provider) {
     case "custom":
       return !!secrets.custom?.some((c) => c.id === cfg.customId);
+    case "openrouter":
+      return !!(secrets.openrouterChat?.apiKey || secrets.openrouter?.apiKey);
     default:
       return !!secrets[cfg.provider]?.apiKey;
   }
@@ -238,6 +240,8 @@ export function transcriptionModel(config: AppConfig, secrets: ProviderSecrets):
   }
 }
 
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
 export function speechModel(config: AppConfig, secrets: ProviderSecrets): SpeechModel | null {
   const { provider, model } = config.voice.tts;
   switch (provider) {
@@ -246,6 +250,13 @@ export function speechModel(config: AppConfig, secrets: ProviderSecrets): Speech
     case "google":
       return secrets.google?.apiKey
         ? createGoogleGenerativeAI({ apiKey: secrets.google.apiKey }).speech(model || "gemini-3.1-flash-tts-preview")
+        : null;
+    case "openrouter":
+      // OpenRouter's /audio/speech endpoint is OpenAI-compatible.
+      return secrets.openrouter?.apiKey
+        ? createOpenAI({ apiKey: secrets.openrouter.apiKey, baseURL: OPENROUTER_BASE, name: "openrouter" }).speech(
+            model || "google/gemini-3.1-flash-tts-preview",
+          )
         : null;
     case "elevenlabs":
       return secrets.elevenlabs?.apiKey
@@ -272,9 +283,20 @@ export function ttsVoices(config: AppConfig): { id: string; name: string }[] {
       return GEMINI_VOICES.map((v) => ({ id: v, name: v }));
     case "elevenlabs":
       return parseElevenVoices(config.voice.tts.elevenVoices);
+    case "openrouter":
+      return openRouterVoices(config.voice.tts.model, config.voice.tts.defaultVoice);
     default:
       return [];
   }
+}
+
+/** OpenRouter voices depend on the model: known families get their full list, others use the typed voice. */
+export function openRouterVoices(model: string, typed: string): { id: string; name: string }[] {
+  const m = (model || "google/gemini-3.1-flash-tts-preview").toLowerCase();
+  if (m.startsWith("openai/")) return OPENAI_VOICES.map((v) => ({ id: v, name: v[0].toUpperCase() + v.slice(1) }));
+  if (m.startsWith("google/")) return GEMINI_VOICES.map((v) => ({ id: v, name: v }));
+  const v = typed.trim();
+  return /^[A-Za-z0-9_.-]{1,64}$/.test(v) ? [{ id: v, name: v }] : [];
 }
 
 /** "Rachel=21m00Tcm4TlvDq8ikWAM, Adam=pNInz6obpgDQGcFmaJgB" → list */
