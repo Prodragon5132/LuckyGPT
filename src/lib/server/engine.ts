@@ -20,6 +20,7 @@ import {
   resolveModel,
   resolveTaskModel,
   resolveVisionHelper,
+  voiceErrorMessage,
   webSearchTools,
 } from "./providers";
 import { buildSystemPrompt } from "./prompt";
@@ -193,8 +194,8 @@ function makeDescriber(ctx: {
       show({ ...activity, label: "Looked at image", status: "done" });
       return desc;
     } catch (err) {
-      if (!ctx.signal.aborted) console.warn("[chat] image helper failed", err instanceof Error ? err.message : err);
-      show({ ...activity, label: "Couldn't read image", status: "error" });
+      if (!ctx.signal.aborted) console.warn("[chat] image helper failed", err);
+      show({ ...activity, label: voiceErrorMessage(err, `Couldn't read image with ${ctx.helper.modelId}`).slice(0, 160), status: "error" });
       return "";
     }
   };
@@ -246,7 +247,7 @@ async function toModelMessages(
             type: "text",
             text: cfg.capabilities.vision
               ? `[Earlier image "${file.info.name}" omitted.]`
-              : `[The user attached an image "${file.info.name}", but this model can't see images. Tell them to pick a model that supports images if they ask about it.]`,
+              : `[The user attached an image "${file.info.name}", but this model can't see images and no image-understanding model is set up. Tell them to pick a model that supports images, or ask an admin to choose one under Settings → Models → Image understanding.]`,
           });
         }
       } else if (kind === "pdf" && cfg.capabilities.pdf && rich) {

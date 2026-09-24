@@ -205,7 +205,11 @@ export function resolveTaskModel(config: AppConfig, secrets: ProviderSecrets, fa
 /** The model that describes images for chat models without vision (Settings → Models). */
 export function resolveVisionHelper(config: AppConfig, secrets: ProviderSecrets): ModelConfig | null {
   const id = config.visionHelper;
-  if (!id) return null;
+  if (id === "off") return null;
+  if (!id) {
+    // Auto: the first enabled model that can see images.
+    return enabledModels(config, secrets).find((m) => m.capabilities.vision) ?? null;
+  }
   const configured = config.models.find((m) => m.id === id && m.capabilities.vision && isProviderReady(m, secrets));
   if (configured) return configured;
   if (id.startsWith("openrouter:") && (secrets.openrouterChat?.apiKey || secrets.openrouter?.apiKey)) {

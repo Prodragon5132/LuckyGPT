@@ -529,24 +529,19 @@ function ModelRow({
   );
 }
 
-/** Off, one of the configured models that can see images, or any OpenRouter model ID. */
+/** Auto (any enabled model that can see), Off, one of the configured vision models, or any OpenRouter vision model. */
 function VisionHelperPicker({ value, models, onChange }: { value: string; models: ModelConfig[]; onChange: (v: string) => void }) {
   const vision = models.filter((m) => m.capabilities.vision);
-  const [typing, setTyping] = useState(false);
-  const custom = typing || (!!value && !vision.some((m) => m.id === value));
-  if (custom) {
+  const [picking, setPicking] = useState(false);
+  const fromOpenRouter = picking || (!!value && value !== "off" && !vision.some((m) => m.id === value));
+  if (fromOpenRouter) {
     return (
       <div className="flex items-center gap-2">
-        <input
-          className={cn(inputClass, "w-56 py-1.5 font-mono")}
-          placeholder="e.g. google/gemini-2.5-flash"
-          value={value.replace(/^openrouter:/, "")}
-          onChange={(e) => onChange(e.target.value.trim() ? `openrouter:${e.target.value.trim()}` : "openrouter:")}
-        />
+        <OpenRouterModelPicker kind="vision" value={value.replace(/^openrouter:/, "")} onChange={(id) => onChange(id ? `openrouter:${id}` : "openrouter:")} />
         <button
           className="text-xs text-link hover:underline"
           onClick={() => {
-            setTyping(false);
+            setPicking(false);
             onChange("");
           }}
         >
@@ -560,16 +555,17 @@ function VisionHelperPicker({ value, models, onChange }: { value: string; models
       value={value}
       onChange={(v) => {
         if (v === "__openrouter") {
-          setTyping(true);
-          onChange("openrouter:");
+          setPicking(true);
+          onChange("openrouter:google/gemini-2.5-flash-lite");
         } else onChange(v);
       }}
       options={[
-        { value: "", label: "Off" },
+        { value: "", label: vision.length ? `Auto (${vision[0].name})` : "Auto (none can see yet)" },
+        { value: "off", label: "Off" },
         ...vision.map((m) => ({ value: m.id, label: m.name })),
-        { value: "__openrouter", label: "Any OpenRouter model…" },
+        { value: "__openrouter", label: "Pick an OpenRouter model…" },
       ]}
-      className="max-w-[200px]"
+      className="max-w-[220px]"
     />
   );
 }
@@ -707,18 +703,19 @@ const OPENAI_VOICES = ["alloy", "ash", "ballad", "cedar", "coral", "echo", "fabl
 const GEMINI_VOICES = ["Kore", "Puck", "Zephyr", "Charon", "Fenrir", "Leda", "Aoede", "Orus", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"];
 
 /** Pick an OpenRouter text-to-speech model from OpenRouter's list, or type any model ID. */
-function OpenRouterTtsModel({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+/** Pick an OpenRouter model of one kind (voice, transcription, vision) from OpenRouter's live list, or type any ID. */
+function OpenRouterModelPicker({ kind, value, onChange }: { kind: "tts" | "stt" | "vision"; value: string; onChange: (v: string) => void }) {
   const [list, setList] = useState<{ modelId: string; name: string }[] | null>(null);
   const [typing, setTyping] = useState(false);
   useEffect(() => {
     let alive = true;
-    api<{ modelId: string; name: string }[]>("/api/admin/provider-models?kind=tts")
+    api<{ modelId: string; name: string }[]>(`/api/admin/provider-models?kind=${kind}`)
       .then((l) => alive && setList(l))
       .catch(() => alive && setList([]));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [kind]);
   if (!list) return <Spinner size={16} />;
   const known = list.some((m) => m.modelId === value);
   if (typing || !list.length || (!known && value)) {
@@ -776,7 +773,11 @@ export function VoiceTab() {
         </Row>
         {v.stt.provider !== "browser" && (
           <Row label="Model" description={keyMissing(v.stt.provider) ? <span className="text-danger">Add this provider&apos;s API key first.</span> : undefined}>
-            <input className={cn(inputClass, "w-56 py-1.5 font-mono")} value={v.stt.model} onChange={(e) => setV({ stt: { ...v.stt, model: e.target.value } })} />
+            {v.stt.provider === "openrouter" ? (
+              <OpenRouterModelPicker kind="stt" value={v.stt.model} onChange={(model) => setV({ stt: { ...v.stt, model } })} />
+            ) : (
+              <input className={cn(inputClass, "w-56 py-1.5 font-mono")} value={v.stt.model} onChange={(e) => setV({ stt: { ...v.stt, model: e.target.value } })} />
+            )}
           </Row>
         )}
       </Section>
@@ -826,7 +827,7 @@ export function VoiceTab() {
               }
             >
               {v.tts.provider === "openrouter" ? (
-                <OpenRouterTtsModel value={v.tts.model} onChange={(model) => setV({ tts: { ...v.tts, model } })} />
+                <OpenRouterModelPicker kind="tts" value={v.tts.model} onChange={(model) => setV({ tts: { ...v.tts, model } })} />
               ) : (
                 <input className={cn(inputClass, "w-56 py-1.5 font-mono")} value={v.tts.model} onChange={(e) => setV({ tts: { ...v.tts, model: e.target.value } })} />
               )}

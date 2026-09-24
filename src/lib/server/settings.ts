@@ -50,8 +50,8 @@ export interface AppConfig {
   /** Small, cheap model for titles and background jobs. */
   taskModel: string | null;
   /**
-   * Helper that looks at images for chat models that can't see: "" (off), the id of a
-   * configured vision model, or "openrouter:<model id>" for any OpenRouter model.
+   * Helper that looks at images for chat models that can't see: "" (auto: any enabled model that
+   * can see), "off", the id of a configured vision model, or "openrouter:<model id>".
    */
   visionHelper: string;
   image: { provider: "none" | "openai" | "google" | "openrouter"; modelId: string };

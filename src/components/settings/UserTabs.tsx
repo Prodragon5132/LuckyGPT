@@ -129,6 +129,14 @@ export function GeneralTab() {
           className="max-w-[180px]"
         />
       </Row>
+      <Row label="Voice speed" description="How fast voice mode and Read aloud talk.">
+        <Select
+          value={String(prefs.voiceSpeed ?? 1.3)}
+          onChange={(v) => void setPrefs({ voiceSpeed: Number(v) })}
+          options={[0.75, 1, 1.15, 1.3, 1.5, 1.75, 2].map((n) => ({ value: String(n), label: n === 1.3 ? "1.3× (default)" : `${n}×` }))}
+          className="max-w-[180px]"
+        />
+      </Row>
       <Row label="Read responses aloud automatically" description="Reads each new answer out loud (not in voice mode).">
         <Toggle checked={!!prefs.autoReadAloud} onChange={(v) => void setPrefs({ autoReadAloud: v })} />
       </Row>

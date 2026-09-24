@@ -18,7 +18,7 @@ import { Lightbox } from "./Lightbox";
 import { VoiceMode } from "./VoiceMode";
 import { CanvasPanel } from "./CanvasPanel";
 import { DialogHost, Toasts } from "./ui";
-import { unlockAudio } from "@/lib/client/voice";
+import { setVoiceSpeed, unlockAudio } from "@/lib/client/voice";
 import { DESKTOP_QUERY } from "@/lib/client/utils";
 
 type Route =
@@ -51,6 +51,7 @@ export function AppShell({ initialUser }: { initialUser: UserInfo }) {
   const temporary = useApp((s) => s.temporary);
   const canvasOpen = useApp((s) => !!s.canvas);
   const set = useApp((s) => s.set);
+  const voiceSpeed = useApp((s) => s.user?.prefs.voiceSpeed);
 
   useEffect(() => {
     const st = useApp.getState();
@@ -98,6 +99,8 @@ export function AppShell({ initialUser }: { initialUser: UserInfo }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [router, set]);
+
+  useEffect(() => setVoiceSpeed(voiceSpeed ?? 1.3), [voiceSpeed]);
 
   // iPhone: audio may only start from a tap, so unlock the shared player on the first taps.
   useEffect(() => {

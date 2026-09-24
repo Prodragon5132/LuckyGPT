@@ -167,29 +167,52 @@ export async function listRemoteModels(
   }
 }
 
-/** Known OpenRouter text-to-speech models, shown even if the live list can't be loaded. */
-const OPENROUTER_TTS_KNOWN = [
-  { modelId: "google/gemini-3.1-flash-tts-preview", name: "Google: Gemini 3.1 Flash TTS Preview" },
-  { modelId: "openai/gpt-4o-mini-tts-2025-12-15", name: "OpenAI: GPT-4o Mini TTS" },
-];
+export type OpenRouterKind = "tts" | "stt" | "vision";
 
-/** OpenRouter's text-to-speech models (the ones that output speech/audio). */
-export async function listOpenRouterTtsModels(): Promise<{ modelId: string; name: string }[]> {
+/** Shown even if OpenRouter's live list can't be loaded. */
+const OPENROUTER_KNOWN: Record<OpenRouterKind, { modelId: string; name: string }[]> = {
+  tts: [
+    { modelId: "google/gemini-3.1-flash-tts-preview", name: "Google: Gemini 3.1 Flash TTS Preview" },
+    { modelId: "fish-audio/s2.1-pro", name: "Fish Audio: S2.1 Pro" },
+    { modelId: "openai/gpt-4o-mini-tts-2025-12-15", name: "OpenAI: GPT-4o Mini TTS" },
+  ],
+  stt: [
+    { modelId: "openai/gpt-4o-mini-transcribe", name: "OpenAI: GPT-4o Mini Transcribe" },
+    { modelId: "openai/gpt-4o-transcribe", name: "OpenAI: GPT-4o Transcribe" },
+    { modelId: "openai/whisper-1", name: "OpenAI: Whisper" },
+  ],
+  vision: [
+    { modelId: "google/gemini-2.5-flash-lite", name: "Google: Gemini 2.5 Flash Lite" },
+    { modelId: "google/gemini-2.5-flash", name: "Google: Gemini 2.5 Flash" },
+    { modelId: "openai/gpt-4o-mini", name: "OpenAI: GPT-4o-mini" },
+  ],
+};
+
+type OrModel = { id: string; name: string; architecture?: { input_modalities?: string[]; output_modalities?: string[] } };
+
+/**
+ * OpenRouter models for voice and image helpers: text-to-speech ("tts"), speech-to-text ("stt")
+ * or models that can see images ("vision"). Free models are listed first.
+ */
+export async function listOpenRouterModels(kind: OpenRouterKind): Promise<{ modelId: string; name: string }[]> {
   let live: { modelId: string; name: string }[] = [];
   try {
-    const data = (await getJson("https://openrouter.ai/api/v1/models?output_modalities=all", {})) as {
-      data: { id: string; name: string; architecture?: { output_modalities?: string[] } }[];
-    };
+    // Speech and transcription models are left out of OpenRouter's default catalog; ask for them by modality.
+    const query = kind === "tts" ? "?output_modalities=speech" : kind === "stt" ? "?output_modalities=transcription" : "";
+    const data = (await getJson(`https://openrouter.ai/api/v1/models${query}`, {})) as { data: OrModel[] };
     live = data.data
       .filter((m) => {
-        const out = m.architecture?.output_modalities ?? [];
-        const speaks = out.some((o) => o === "speech" || o === "audio") && !out.includes("text");
-        return speaks || /(^|[-/])tts|text-to-speech/i.test(m.id);
+        const input = m.architecture?.input_modalities ?? [];
+        const output = m.architecture?.output_modalities ?? [];
+        if (kind === "vision") return input.includes("image") && output.includes("text");
+        if (kind === "tts") return output.some((o) => o === "speech" || o === "audio") || /(^|[-/])tts|speech/i.test(m.id);
+        return input.includes("audio") || /transcri|whisper|stt/i.test(m.id);
       })
-      .map((m) => ({ modelId: m.id, name: m.name }));
+      .map((m) => ({ modelId: m.id, name: m.name }))
+      .sort((a, b) => Number(b.modelId.endsWith(":free")) - Number(a.modelId.endsWith(":free")));
   } catch {
     // Fall back to the known list below.
   }
   const seen = new Set(live.map((m) => m.modelId));
-  return [...live, ...OPENROUTER_TTS_KNOWN.filter((m) => !seen.has(m.modelId))];
+  return [...live, ...OPENROUTER_KNOWN[kind].filter((m) => !seen.has(m.modelId))];
 }

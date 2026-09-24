@@ -233,6 +233,13 @@ export function createRecognizer(opts: {
 // ---------- Text to speech ----------
 
 let currentAudio: HTMLAudioElement | null = null;
+
+// Speaking speed (Settings → General → Voice speed). Applied while playing, so it works with every
+// voice provider (OpenAI, Gemini, Fish Audio, ElevenLabs…) and the browser's voices.
+let voiceSpeed = 1.3;
+export function setVoiceSpeed(speed: number | undefined) {
+  voiceSpeed = speed && speed >= 0.5 && speed <= 2.5 ? speed : 1.3;
+}
 let currentAbort: AbortController | null = null;
 const speakingListeners = new Set<(id: string | null) => void>();
 let speakingId: string | null = null;
@@ -294,6 +301,9 @@ export function playBlob(blob: Blob, signal?: AbortSignal): Promise<boolean> {
       done(true);
     });
     audio.src = url;
+    audio.preservesPitch = true;
+    audio.defaultPlaybackRate = voiceSpeed;
+    audio.playbackRate = voiceSpeed;
     audio.play().catch(() => done(false));
   });
 }
@@ -306,7 +316,7 @@ export function speakBrowser(text: string, opts: { lang?: string; voiceName?: st
     const voices = speechSynthesis.getVoices();
     const v = voices.find((x) => x.name === opts.voiceName) ?? voices.find((x) => x.default && x.lang.startsWith((u.lang || navigator.language).slice(0, 2)));
     if (v) u.voice = v;
-    u.rate = 1.02;
+    u.rate = Math.min(2.5, 1.02 * voiceSpeed);
     u.onend = () => resolve();
     u.onerror = () => resolve();
     signal?.addEventListener("abort", () => {

@@ -21,6 +21,7 @@ const prefsSchema = z
     memoryEnabled: z.boolean(),
     followUps: z.boolean(),
     autoReadAloud: z.boolean(),
+    voiceSpeed: z.number().min(0.5).max(2.5),
   })
   .partial();
 

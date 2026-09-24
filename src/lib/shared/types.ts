@@ -119,6 +119,8 @@ export interface UserPrefs {
   memoryEnabled: boolean;
   followUps: boolean;
   autoReadAloud?: boolean;
+  /** Speaking speed for voice replies and Read aloud (1 = the voice's normal speed). */
+  voiceSpeed?: number;
 }
 
 export const DEFAULT_PREFS: UserPrefs = {
@@ -131,6 +133,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   customInstructions: { enabled: true, nickname: "", occupation: "", traits: "", about: "" },
   memoryEnabled: true,
   followUps: true,
+  voiceSpeed: 1.3,
 };
 
 export interface UserInfo {
