@@ -59,7 +59,7 @@ function CanvasEditor() {
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-surface md:static md:z-auto md:w-[48%] md:min-w-[380px] md:border-l md:border-line-2">
+    <div className="safe-area fixed inset-0 z-40 flex flex-col bg-surface md:static md:z-auto md:w-[48%] md:min-w-[380px] md:border-l md:border-line-2">
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-line-2 px-3">
         <IconButton label="Close canvas" onClick={() => set({ canvas: null })}>
           <CloseIcon size={20} />

@@ -13,6 +13,9 @@ export async function countRecent(key: string, windowMs: number): Promise<{ coun
   return { count: num(row?.c), oldest: num(row?.oldest) };
 }
 
+/** One row per prompt sent to an OpenRouter model (for the daily usage bar). */
+export const OPENROUTER_USAGE_KEY = "usage:openrouter";
+
 export async function recordHit(key: string): Promise<void> {
   await query(`INSERT INTO rate_limits (key, at) VALUES ($1, $2)`, [key, Date.now()]);
   if (Math.random() < 0.02) {

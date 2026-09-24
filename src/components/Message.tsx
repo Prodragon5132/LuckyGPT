@@ -193,7 +193,7 @@ export const UserMessage = memo(function UserMessage({
           {message.text}
         </div>
       )}
-      <div className="mt-1 flex h-8 items-center gap-0.5 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+      <div className="mt-1 flex h-8 items-center gap-0.5 opacity-100 transition-opacity can-hover:opacity-0 can-hover:group-hover:opacity-100 can-hover:focus-within:opacity-100">
         <CopyButton text={message.text} />
         {canEdit && (
           <IconButton
@@ -325,7 +325,7 @@ function GeneratedImages({ images }: { images: Attachment[] }) {
           </button>
           <a
             href={fileUrl(img.id, { download: true })}
-            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100"
+            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 touch:opacity-100"
             aria-label="Download image"
           >
             <DownloadIcon size={16} />
@@ -432,7 +432,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         <div
           className={cn(
             "mt-1 flex h-9 items-center gap-0.5 transition-opacity",
-            isLast ? "opacity-100" : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100",
+            isLast ? "opacity-100" : "opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 can-hover:focus-within:opacity-100",
           )}
         >
           <BranchNav info={branch} />
@@ -457,6 +457,7 @@ export const AssistantMessage = memo(function AssistantMessage({
                       tts: voiceCfg.tts,
                       voice: prefs?.voice && prefs.voice !== "default" ? prefs.voice : undefined,
                       lang: prefs?.spokenLanguage,
+                      onError: (m) => useApp.getState().toast(m, "error"),
                     })
               }
             >

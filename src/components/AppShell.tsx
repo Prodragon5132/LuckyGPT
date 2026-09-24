@@ -18,6 +18,8 @@ import { Lightbox } from "./Lightbox";
 import { VoiceMode } from "./VoiceMode";
 import { CanvasPanel } from "./CanvasPanel";
 import { DialogHost, Toasts } from "./ui";
+import { unlockAudio } from "@/lib/client/voice";
+import { DESKTOP_QUERY } from "@/lib/client/utils";
 
 type Route =
   | { view: "chat"; key: string; gptId?: string; chatId?: string }
@@ -97,6 +99,73 @@ export function AppShell({ initialUser }: { initialUser: UserInfo }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [router, set]);
 
+  // iPhone: audio may only start from a tap, so unlock the shared player on the first taps.
+  useEffect(() => {
+    const opts = { capture: true, passive: true } as const;
+    window.addEventListener("click", unlockAudio, opts);
+    window.addEventListener("touchend", unlockAudio, opts);
+    return () => {
+      window.removeEventListener("click", unlockAudio, opts);
+      window.removeEventListener("touchend", unlockAudio, opts);
+    };
+  }, []);
+
+  // iPhone keyboard: size the app to the visible area so the composer sits right above the
+  // keyboard and the top bar never scrolls away.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement.style;
+    const update = () => {
+      if (Math.abs(vv.scale - 1) > 0.01) return; // pinch-zoomed: leave the layout alone
+      root.setProperty("--app-h", `${Math.round(vv.height)}px`);
+      root.setProperty("--app-top", `${Math.round(vv.offsetTop)}px`);
+      // Keyboard open → no need to leave room for the home indicator.
+      document.documentElement.toggleAttribute("data-keyboard", window.innerHeight - vv.height > 120);
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+
+  // Phones: swipe right from the left edge to open the sidebar, swipe left to close it (like the ChatGPT app).
+  useEffect(() => {
+    let start: { x: number; y: number; open: boolean } | null = null;
+    const onStart = (e: TouchEvent) => {
+      if (window.matchMedia(DESKTOP_QUERY).matches || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const open = useApp.getState().mobileNav;
+      start = open || t.clientX < 28 ? { x: t.clientX, y: t.clientY, open } : null;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!start) return;
+      const t = e.touches[0];
+      const dx = t.clientX - start.x;
+      const dy = Math.abs(t.clientY - start.y);
+      if (dy > 40) start = null;
+      else if (!start.open && dx > 60) {
+        set({ mobileNav: true });
+        start = null;
+      } else if (start.open && dx < -60) {
+        set({ mobileNav: false });
+        start = null;
+      }
+    };
+    const onEnd = () => (start = null);
+    window.addEventListener("touchstart", onStart, { passive: true });
+    window.addEventListener("touchmove", onMove, { passive: true });
+    window.addEventListener("touchend", onEnd, { passive: true });
+    return () => {
+      window.removeEventListener("touchstart", onStart);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+    };
+  }, [set]);
+
   // Close the canvas when leaving a chat.
   useEffect(() => {
     const c = useApp.getState().canvas;
@@ -135,7 +204,7 @@ export function AppShell({ initialUser }: { initialUser: UserInfo }) {
   }
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-surface text-fg">
+    <div className="app-frame flex overflow-hidden bg-surface text-fg">
       <Sidebar />
       <main className="relative flex min-w-0 flex-1 flex-col">
         {topBar}

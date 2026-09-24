@@ -114,6 +114,7 @@ export function GeneralTab() {
               tts: voiceCfg.tts,
               voice: prefs.voice !== "default" ? prefs.voice : undefined,
               lang: prefs.spokenLanguage,
+              onError: (m) => useApp.getState().toast(m, "error"),
             })
           }
           onBlur={() => stopSpeaking()}

@@ -174,6 +174,11 @@ export async function listFiles(
   return rows.map(toInfo);
 }
 
+/** Saves text for a file (for images: a description made by the image helper, so it's only made once). */
+export async function setFileText(userId: string, id: string, text: string): Promise<void> {
+  await query(`UPDATE files SET text_content = $3 WHERE id = $1 AND user_id = $2`, [id, userId, encryptText(text, `ftext:${id}`)]);
+}
+
 export async function attachFileToChat(userId: string, fileId: string, chatId: string): Promise<void> {
   await query(`UPDATE files SET chat_id = $3 WHERE id = $1 AND user_id = $2 AND chat_id IS NULL`, [fileId, userId, chatId]);
 }

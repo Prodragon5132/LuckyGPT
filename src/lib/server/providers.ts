@@ -7,6 +7,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createGroq } from "@ai-sdk/groq";
 import { createElevenLabs } from "@ai-sdk/elevenlabs";
+import { APICallError } from "ai";
 import { HttpError } from "./http";
 import type { AppConfig, CustomEndpoint, ModelConfig, ProviderSecrets } from "./settings";
 import { providerLabel } from "./settings";
@@ -201,6 +202,26 @@ export function resolveTaskModel(config: AppConfig, secrets: ProviderSecrets, fa
   return models.find((m) => m.id === config.taskModel) ?? fallback;
 }
 
+/** The model that describes images for chat models without vision (Settings → Models). */
+export function resolveVisionHelper(config: AppConfig, secrets: ProviderSecrets): ModelConfig | null {
+  const id = config.visionHelper;
+  if (!id) return null;
+  const configured = config.models.find((m) => m.id === id && m.capabilities.vision && isProviderReady(m, secrets));
+  if (configured) return configured;
+  if (id.startsWith("openrouter:") && (secrets.openrouterChat?.apiKey || secrets.openrouter?.apiKey)) {
+    return {
+      id,
+      provider: "openrouter",
+      modelId: id.slice("openrouter:".length),
+      name: "Image helper",
+      description: "",
+      enabled: true,
+      capabilities: { vision: true, pdf: false, tools: false, reasoning: false, webSearch: false, imageOutput: false },
+    };
+  }
+  return null;
+}
+
 export function imageModel(config: AppConfig, secrets: ProviderSecrets): ImageModel | null {
   const { provider, modelId } = config.image;
   if (!modelId) return null;
@@ -241,6 +262,79 @@ export function transcriptionModel(config: AppConfig, secrets: ProviderSecrets):
 }
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
+/** Whether server speech-to-text is usable (OpenRouter is called directly, see transcribeOpenRouter). */
+export function sttReady(config: AppConfig, secrets: ProviderSecrets): boolean {
+  if (config.voice.stt.provider === "openrouter") return !!secrets.openrouter?.apiKey;
+  return !!transcriptionModel(config, secrets);
+}
+
+/** OpenRouter's /audio/transcriptions takes JSON with base64 audio (not OpenAI's multipart form). */
+export async function transcribeOpenRouter(
+  config: AppConfig,
+  secrets: ProviderSecrets,
+  audio: Uint8Array,
+  format: string,
+  language?: string,
+): Promise<string> {
+  const key = secrets.openrouter?.apiKey || missingKey("OpenRouter");
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await transcribeOpenRouterOnce(key, config.voice.stt.model, audio, format, language);
+    } catch (err) {
+      const retryable = APICallError.isInstance(err) ? err.isRetryable : !(err instanceof HttpError);
+      if (attempt >= 3 || !retryable) throw err;
+      await new Promise((r) => setTimeout(r, attempt * 600));
+    }
+  }
+}
+
+async function transcribeOpenRouterOnce(key: string, model: string, audio: Uint8Array, format: string, language?: string): Promise<string> {
+  const res = await fetch(`${OPENROUTER_BASE}/audio/transcriptions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "LuckyGPT" },
+    body: JSON.stringify({
+      model: model || "openai/gpt-4o-mini-transcribe",
+      input_audio: { data: Buffer.from(audio).toString("base64"), format },
+      ...(language ? { language } : {}),
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new APICallError({
+      message: text.slice(0, 500),
+      url: `${OPENROUTER_BASE}/audio/transcriptions`,
+      requestBodyValues: {},
+      statusCode: res.status,
+      responseBody: text,
+      isRetryable: res.status === 429 || res.status >= 500,
+    });
+  }
+  const data = JSON.parse(text) as { text?: string };
+  return data.text ?? "";
+}
+
+/** A short, human message for a failed voice (speech) request, including what the provider said. */
+export function voiceErrorMessage(err: unknown, what: string): string {
+  if (err instanceof HttpError) return err.message;
+  if (APICallError.isInstance(err)) {
+    let detail = "";
+    try {
+      const body = JSON.parse(err.responseBody ?? "") as { error?: { message?: string } | string; message?: string };
+      detail = (typeof body.error === "string" ? body.error : body.error?.message) || body.message || "";
+    } catch {
+      detail = (err.responseBody ?? "").slice(0, 200);
+    }
+    const s = err.statusCode;
+    if (s === 401 || s === 403)
+      return `${what}: access was refused (${s}${detail ? `: ${detail.slice(0, 120)}` : ""}). An admin should check Settings → API keys.`;
+    if (s === 402) return `${what}: the account is out of credits.`;
+    if (s === 404) return `${what}: model not found. An admin can change it in Settings → Voice.`;
+    return `${what} failed${s ? ` (${s})` : ""}${detail ? `: ${detail.slice(0, 200)}` : "."}`;
+  }
+  return `${what} failed: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`;
+}
 
 export function speechModel(config: AppConfig, secrets: ProviderSecrets): SpeechModel | null {
   const { provider, model } = config.voice.tts;

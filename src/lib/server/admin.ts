@@ -28,13 +28,19 @@ export const appConfigSchema = z.object({
   models: z.array(modelConfigSchema).max(200),
   defaultModel: z.string().max(100).nullable(),
   taskModel: z.string().max(100).nullable(),
+  visionHelper: z
+    .string()
+    .max(220)
+    .regex(/^[A-Za-z0-9._:/@-]*$/, "The image model ID can only contain letters, numbers and . _ : / @ -")
+    .default("")
+    .transform((v) => (v === "openrouter:" ? "" : v)),
   image: z.object({
     provider: z.enum(["none", "openai", "google", "openrouter"]),
     modelId: z.string().max(200),
   }),
   voice: z.object({
     chatModel: z.string().max(100).nullable(),
-    stt: z.object({ provider: z.enum(["browser", "openai", "groq", "google", "elevenlabs"]), model: z.string().max(200) }),
+    stt: z.object({ provider: z.enum(["browser", "openai", "groq", "google", "openrouter", "elevenlabs"]), model: z.string().max(200) }),
     tts: z.object({
       provider: z.enum(["browser", "openai", "google", "openrouter", "elevenlabs"]),
       model: z.string().max(200),

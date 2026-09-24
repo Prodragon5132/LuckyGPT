@@ -197,4 +197,15 @@ export type StreamEvent =
   | { type: "canvas"; canvas: Canvas }
   | { type: "title"; chatId: string; title: string }
   | { type: "error"; message: string }
+  /** A failed attempt is being retried: clear what was streamed so far. */
+  | { type: "reset" }
   | { type: "done"; status: MessageStatus };
+
+/** Usage shown in the profile menu (only when OpenRouter models are in use). */
+export interface UsageInfo {
+  openrouter: boolean;
+  /** Dollars spent vs. the key's limit or the account's credits, when OpenRouter reports it. */
+  credits: { used: number; total: number; label: string } | null;
+  /** OpenRouter prompts sent today (UTC) vs. the 1000/day free-model limit. */
+  prompts: { used: number; total: number; resetsAt: number } | null;
+}

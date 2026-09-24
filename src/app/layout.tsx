@@ -8,12 +8,15 @@ export const metadata: Metadata = {
   description: "Your private AI assistant",
   applicationName: "LuckyGPT",
   appleWebApp: { capable: true, title: "LuckyGPT", statusBarStyle: "default" },
+  formatDetection: { telephone: false, email: false, address: false },
   robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Stops iPhone from zooming in whenever a text box is focused (pinch-zoom still works on iOS).
+  maximumScale: 1,
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
   themeColor: [

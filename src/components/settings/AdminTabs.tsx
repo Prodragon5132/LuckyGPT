@@ -28,10 +28,11 @@ interface AppConfig {
   models: ModelConfig[];
   defaultModel: string | null;
   taskModel: string | null;
+  visionHelper: string;
   image: { provider: "none" | "openai" | "google" | "openrouter"; modelId: string };
   voice: {
     chatModel: string | null;
-    stt: { provider: "browser" | "openai" | "groq" | "google" | "elevenlabs"; model: string };
+    stt: { provider: "browser" | "openai" | "groq" | "google" | "openrouter" | "elevenlabs"; model: string };
     tts: { provider: "browser" | "openai" | "google" | "openrouter" | "elevenlabs"; model: string; defaultVoice: string; elevenVoices: string };
   };
   webSearch: "auto" | "manual";
@@ -528,6 +529,51 @@ function ModelRow({
   );
 }
 
+/** Off, one of the configured models that can see images, or any OpenRouter model ID. */
+function VisionHelperPicker({ value, models, onChange }: { value: string; models: ModelConfig[]; onChange: (v: string) => void }) {
+  const vision = models.filter((m) => m.capabilities.vision);
+  const [typing, setTyping] = useState(false);
+  const custom = typing || (!!value && !vision.some((m) => m.id === value));
+  if (custom) {
+    return (
+      <div className="flex items-center gap-2">
+        <input
+          className={cn(inputClass, "w-56 py-1.5 font-mono")}
+          placeholder="e.g. google/gemini-2.5-flash"
+          value={value.replace(/^openrouter:/, "")}
+          onChange={(e) => onChange(e.target.value.trim() ? `openrouter:${e.target.value.trim()}` : "openrouter:")}
+        />
+        <button
+          className="text-xs text-link hover:underline"
+          onClick={() => {
+            setTyping(false);
+            onChange("");
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+  return (
+    <Select
+      value={value}
+      onChange={(v) => {
+        if (v === "__openrouter") {
+          setTyping(true);
+          onChange("openrouter:");
+        } else onChange(v);
+      }}
+      options={[
+        { value: "", label: "Off" },
+        ...vision.map((m) => ({ value: m.id, label: m.name })),
+        { value: "__openrouter", label: "Any OpenRouter model…" },
+      ]}
+      className="max-w-[200px]"
+    />
+  );
+}
+
 export function ModelsTab() {
   const { view, draft, setDraft, save, saving, dirty } = useAdminConfig();
   const [adding, setAdding] = useState(false);
@@ -544,6 +590,12 @@ export function ModelsTab() {
         </Row>
         <Row label="Background model" description="A small, cheap model used to name chats.">
           <Select value={draft.taskModel ?? ""} onChange={(v) => update({ taskModel: v || null })} options={[{ value: "", label: "Same as chat" }, ...modelOptions]} className="max-w-[200px]" />
+        </Row>
+        <Row
+          label="Image understanding"
+          description="Describes photos for text-only models that can't see images."
+        >
+          <VisionHelperPicker value={draft.visionHelper ?? ""} models={enabled} onChange={(visionHelper) => update({ visionHelper })} />
         </Row>
         <Row label="Web search" description="Auto lets models search whenever they need fresh info (costs a little per search).">
           <Select
@@ -642,6 +694,7 @@ const STT_DEFAULTS: Record<string, string> = {
   openai: "gpt-4o-mini-transcribe",
   groq: "whisper-large-v3-turbo",
   google: "gemini-3.5-transcribe",
+  openrouter: "openai/gpt-4o-mini-transcribe",
   elevenlabs: "scribe_v2",
 };
 const TTS_DEFAULTS: Record<string, string> = {
@@ -716,6 +769,7 @@ export function VoiceTab() {
               { value: "openai", label: "OpenAI" },
               { value: "groq", label: "Groq (fast)" },
               { value: "google", label: "Google" },
+              { value: "openrouter", label: "OpenRouter" },
               { value: "elevenlabs", label: "ElevenLabs" },
             ]}
           />

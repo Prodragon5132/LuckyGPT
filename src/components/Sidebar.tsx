@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useApp } from "@/lib/client/store";
 import { api } from "@/lib/client/api";
 import { cn, initials, isMac, useIsDesktop } from "@/lib/client/utils";
-import type { ChatSummary } from "@/lib/shared/types";
+import type { ChatSummary, UsageInfo } from "@/lib/shared/types";
 import {
   ArchiveIcon,
   ChevronDown,
@@ -107,7 +107,7 @@ function ChatItem({ chat, active }: { chat: ChatSummary; active: boolean }) {
           }}
           className={cn(
             "absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-fg-2 hover:text-fg",
-            menu || active ? "opacity-100" : "opacity-100 md:opacity-0 md:group-hover:opacity-100",
+            menu || active ? "opacity-100" : "opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100",
           )}
           aria-label="Chat options"
         >
@@ -236,6 +236,58 @@ function NavItem({
   );
 }
 
+function UsageBar({ label, used, total, text }: { label: string; used: number; total: number; text: string }) {
+  const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+  return (
+    <div className="px-2.5 py-1.5">
+      <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-fg-2">{label}</span>
+        <span className="tabular-nums text-fg-3">{text}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={label} aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+        <div className={cn("h-full rounded-full", pct >= 90 ? "bg-danger" : pct >= 70 ? "bg-[#e0ac00]" : "bg-[#1f9d63]")} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/** OpenRouter usage: spend vs. credits/limit when OpenRouter reports it, and prompts today vs. 1000. */
+function UsageBars() {
+  const [usage, setUsage] = useState<UsageInfo | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api<UsageInfo>("/api/usage")
+      .then((u) => alive && setUsage(u))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!usage?.openrouter) return null;
+  const money = (n: number) => `$${n < 10 ? n.toFixed(2) : n.toFixed(0)}`;
+  return (
+    <>
+      <MenuSeparator />
+      {usage.credits && (
+        <UsageBar
+          label={usage.credits.label}
+          used={usage.credits.used}
+          total={usage.credits.total}
+          text={`${money(usage.credits.used)} of ${money(usage.credits.total)}`}
+        />
+      )}
+      {usage.prompts && (
+        <UsageBar
+          label="Messages today"
+          used={usage.prompts.used}
+          total={usage.prompts.total}
+          text={`${usage.prompts.used} / ${usage.prompts.total}`}
+        />
+      )}
+    </>
+  );
+}
+
 function ProfileMenu({ compact }: { compact?: boolean }) {
   const user = useApp((s) => s.user);
   const set = useApp((s) => s.set);
@@ -272,6 +324,7 @@ function ProfileMenu({ compact }: { compact?: boolean }) {
         <div className="flex items-center gap-2.5 px-2.5 py-2 text-sm text-fg-2">
           <span className="truncate">@{user.username}</span>
         </div>
+        <UsageBars />
         <MenuSeparator />
         <MenuItem
           icon={<PaletteIcon size={18} />}
@@ -459,7 +512,7 @@ export function Sidebar() {
         className={cn("absolute inset-0 bg-[var(--overlay)] transition-opacity", mobileNav ? "opacity-100" : "opacity-0")}
         onClick={() => set({ mobileNav: false })}
       />
-      <aside className={cn("absolute inset-y-0 left-0 transition-transform duration-200", mobileNav ? "translate-x-0" : "-translate-x-full")}>
+      <aside className={cn("safe-y absolute inset-y-0 left-0 bg-sidebar transition-transform duration-200", mobileNav ? "translate-x-0" : "-translate-x-full")}>
         {full}
       </aside>
     </div>

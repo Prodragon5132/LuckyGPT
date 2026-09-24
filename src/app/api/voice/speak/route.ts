@@ -2,7 +2,7 @@ import { z } from "zod";
 import { generateSpeech } from "ai";
 import { handler, readJson, HttpError } from "@/lib/server/http";
 import { getConfig, getSecrets } from "@/lib/server/settings";
-import { speechModel, ttsVoices } from "@/lib/server/providers";
+import { speechModel, ttsVoices, voiceErrorMessage } from "@/lib/server/providers";
 import { consume } from "@/lib/server/ratelimit";
 
 export const maxDuration = 60;
@@ -25,20 +25,25 @@ export const POST = handler(async (req, { user }) => {
     voices.find((v) => v.id === config.voice.tts.defaultVoice)?.id ??
     voices[0]?.id;
   const provider = config.voice.tts.provider;
-  const result = await generateSpeech({
-    model,
-    text: body.text,
-    voice,
-    outputFormat: provider === "google" ? "wav" : "mp3",
-    ...(provider === "openai" ? { instructions: "Speak in a warm, natural, conversational tone." } : {}),
-    abortSignal: AbortSignal.timeout(45_000),
-    maxRetries: 1,
-  });
-  const audio = result.audio;
-  return new Response(new Uint8Array(audio.uint8Array), {
-    headers: {
-      "Content-Type": audio.mediaType || (provider === "google" ? "audio/wav" : "audio/mpeg"),
-      "Cache-Control": "no-store",
-    },
-  });
+  try {
+    const result = await generateSpeech({
+      model,
+      text: body.text,
+      voice,
+      outputFormat: provider === "google" ? "wav" : "mp3",
+      ...(provider === "openai" ? { instructions: "Speak in a warm, natural, conversational tone." } : {}),
+      abortSignal: AbortSignal.timeout(45_000),
+      maxRetries: 2, // 3 attempts in total
+    });
+    const audio = result.audio;
+    return new Response(new Uint8Array(audio.uint8Array), {
+      headers: {
+        "Content-Type": audio.mediaType || (provider === "google" ? "audio/wav" : "audio/mpeg"),
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (err) {
+    console.error("[voice] text-to-speech failed", err);
+    throw new HttpError(502, voiceErrorMessage(err, "Text-to-speech"));
+  }
 });

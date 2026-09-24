@@ -100,6 +100,7 @@ export function ChatView({ sessionKey, gptId, projectId }: { sessionKey: string;
           tts: st.voiceCfg.tts,
           voice: st.user.prefs.voice !== "default" ? st.user.prefs.voice : undefined,
           lang: st.user.prefs.spokenLanguage,
+          onError: (m) => st.toast(m, "error"),
         });
       }
     }

@@ -77,7 +77,7 @@ function SearchPanel() {
 
   return (
     <Portal>
-      <div className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--overlay)] p-3 pt-[10vh] fade-in" onMouseDown={close}>
+      <div className="fixed inset-0 z-50 flex items-start justify-center bg-[var(--overlay)] p-3 pt-[max(10vh,env(safe-area-inset-top))] fade-in" onMouseDown={close}>
         <div
           className="pop-in flex max-h-[70vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-elevated shadow-2xl dark:bg-[#2f2f2f]"
           onMouseDown={(e) => e.stopPropagation()}

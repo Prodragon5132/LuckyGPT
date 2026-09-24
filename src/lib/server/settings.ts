@@ -41,7 +41,7 @@ export interface ModelConfig {
   capabilities: ModelCapabilities;
 }
 
-export type SttProvider = "browser" | "openai" | "groq" | "google" | "elevenlabs";
+export type SttProvider = "browser" | "openai" | "groq" | "google" | "openrouter" | "elevenlabs";
 export type TtsProvider = "browser" | "openai" | "google" | "openrouter" | "elevenlabs";
 
 export interface AppConfig {
@@ -49,6 +49,11 @@ export interface AppConfig {
   defaultModel: string | null;
   /** Small, cheap model for titles and background jobs. */
   taskModel: string | null;
+  /**
+   * Helper that looks at images for chat models that can't see: "" (off), the id of a
+   * configured vision model, or "openrouter:<model id>" for any OpenRouter model.
+   */
+  visionHelper: string;
   image: { provider: "none" | "openai" | "google" | "openrouter"; modelId: string };
   voice: {
     chatModel: string | null;
@@ -63,6 +68,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   models: [],
   defaultModel: null,
   taskModel: null,
+  visionHelper: "",
   image: { provider: "none", modelId: "" },
   voice: {
     chatModel: null,

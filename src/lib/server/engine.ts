@@ -19,6 +19,7 @@ import {
   providerOptionsFor,
   resolveModel,
   resolveTaskModel,
+  resolveVisionHelper,
   webSearchTools,
 } from "./providers";
 import { buildSystemPrompt } from "./prompt";
@@ -30,11 +31,12 @@ import {
   updateChat,
   updateMessageBody,
 } from "./repo/chats";
-import { attachFileToChat, classify, getFileData, getFileInfo, listFiles, saveFile } from "./repo/files";
+import { attachFileToChat, classify, getFileData, getFileInfo, listFiles, saveFile, setFileText } from "./repo/files";
 import { addMemory, deleteMemory, getGpt, getProject, listMemories } from "./repo/misc";
 import { loadUserInfo, type SessionUser } from "./auth";
 import { HttpError, badRequest } from "./http";
 import { newId } from "./crypto";
+import { OPENROUTER_USAGE_KEY, recordHit } from "./ratelimit";
 import type {
   Activity,
   Attachment,
@@ -92,9 +94,35 @@ interface HistoryItem {
   canvas?: Canvas;
 }
 
+const MAX_ATTEMPTS = 3;
+
+class EmptyReplyError extends Error {
+  constructor() {
+    super("empty response");
+  }
+}
+
+/** Retry anything except problems another try can't fix (bad key, no credits, unknown model, our own checks). */
+function isRetryable(err: unknown): boolean {
+  if (err instanceof HttpError) return false;
+  if (APICallError.isInstance(err)) {
+    const s = err.statusCode;
+    return !(s === 401 || s === 402 || s === 403 || s === 404 || s === 413);
+  }
+  return true;
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => (clearTimeout(t), resolve()), { once: true });
+  });
+}
+
 function friendlyError(err: unknown, cfg: ModelConfig | null): string {
   const who = cfg ? `${cfg.name}` : "The model";
   if (err instanceof HttpError) return err.message;
+  if (err instanceof EmptyReplyError) return `${who} returned an empty response. Try again or pick another model.`;
   if (APICallError.isInstance(err)) {
     const status = err.statusCode;
     if (status === 401 || status === 403)
@@ -102,12 +130,12 @@ function friendlyError(err: unknown, cfg: ModelConfig | null): string {
     if (status === 402) return `${who}: the account is out of credits or billing isn't set up.`;
     if (status === 404) return `${who}: this model ID wasn't found. An admin can fix it in Settings → Models.`;
     if (status === 429) return `${who} is rate limited or out of quota right now. Try again in a moment or pick another model.`;
-    if (status && status >= 500) return `${who}'s servers had a problem (${status}). Please try again.`;
+    if (status && status >= 500) return `${who} is having trouble right now (tried ${MAX_ATTEMPTS} times). Try again in a moment or pick another model.`;
     const detail = (err.message || "").slice(0, 300);
     return `${who} returned an error${status ? ` (${status})` : ""}: ${detail}`;
   }
-  const message = err instanceof Error ? err.message : String(err);
-  return `${who} failed: ${message.slice(0, 300)}`;
+  // Mid-stream provider errors ("Upstream error…", overloads) after all retries.
+  return `${who} is having trouble right now (tried ${MAX_ATTEMPTS} times). Try again in a moment or pick another model.`;
 }
 
 async function loadAttachments(userId: string, ids: string[] | undefined): Promise<Attachment[]> {
@@ -121,7 +149,63 @@ async function loadAttachments(userId: string, ids: string[] | undefined): Promi
 
 const RICH_WINDOW = 6; // only the latest user turns carry full images/PDFs (keeps cost down)
 
-async function toModelMessages(userId: string, history: HistoryItem[], cfg: ModelConfig): Promise<ModelMessage[]> {
+/** Describes an image for a chat model that can't see. Returns "" if the helper fails. */
+type DescribeImage = (file: { id: string; name: string; mime: string; data: Buffer }, question: string) => Promise<string>;
+
+const DESCRIBE_PROMPT = `Describe this image in detail for an AI assistant that can't see it, so it can answer questions about it.
+Include: what it shows, people/objects and their positions, colors, setting, any charts/diagrams (with their values),
+and transcribe ALL visible text exactly (keep line breaks for documents, code and tables). Be factual; don't guess identities.`;
+
+function makeDescriber(ctx: {
+  userId: string;
+  helper: ModelConfig;
+  secrets: ProviderSecrets;
+  send: (e: StreamEvent) => void;
+  body: MessageBody;
+  signal: AbortSignal;
+}): DescribeImage {
+  return async (file, question) => {
+    const activity: Activity = { id: `vision-${file.id}`, kind: "image", label: "Looking at image", status: "running" };
+    const show = (a: Activity) => {
+      ctx.body.activity = [...(ctx.body.activity ?? []).filter((x) => x.id !== a.id), a];
+      ctx.send({ type: "activity", activity: a });
+    };
+    show(activity);
+    try {
+      const { text } = await generateText({
+        model: languageModel(ctx.helper, ctx.secrets),
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: question ? `${DESCRIBE_PROMPT}\n\nThe user's message (focus on what's relevant to it): ${question.slice(0, 1000)}` : DESCRIBE_PROMPT },
+              { type: "image", image: file.data, mediaType: file.mime },
+            ],
+          },
+        ],
+        maxOutputTokens: 1500,
+        providerOptions: providerOptionsFor(ctx.helper, "auto", ctx.userId) as never,
+        abortSignal: ctx.signal,
+        maxRetries: 2, // 3 attempts
+      });
+      const desc = text.trim();
+      if (desc) await setFileText(ctx.userId, file.id, desc).catch(() => {});
+      show({ ...activity, label: "Looked at image", status: "done" });
+      return desc;
+    } catch (err) {
+      if (!ctx.signal.aborted) console.warn("[chat] image helper failed", err instanceof Error ? err.message : err);
+      show({ ...activity, label: "Couldn't read image", status: "error" });
+      return "";
+    }
+  };
+}
+
+async function toModelMessages(
+  userId: string,
+  history: HistoryItem[],
+  cfg: ModelConfig,
+  describe?: DescribeImage,
+): Promise<ModelMessage[]> {
   const msgs: ModelMessage[] = [];
   const userTurns = history.filter((h) => h.role === "user").length;
   let userIndex = 0;
@@ -148,6 +232,15 @@ async function toModelMessages(userId: string, history: HistoryItem[], cfg: Mode
       if (kind === "image") {
         if (cfg.capabilities.vision && rich) {
           content.push({ type: "image", image: file.data, mediaType: file.info.mime });
+        } else if (!cfg.capabilities.vision && describe && (rich || file.text)) {
+          // This model can't see: the image helper describes it (once; the description is saved with the file).
+          const desc = file.text || (await describe({ id: file.info.id, name: file.info.name, mime: file.info.mime, data: file.data }, item.text));
+          content.push({
+            type: "text",
+            text: desc
+              ? `[Image "${file.info.name}", described for you by an image-understanding model because you can't see images directly. Answer naturally as if you can see it:\n${desc}\n]`
+              : `[The user attached an image "${file.info.name}", but it couldn't be read right now. Say so if they ask about it.]`,
+          });
         } else {
           content.push({
             type: "text",
@@ -210,6 +303,7 @@ export async function runChat(user: SessionUser, req: ChatRequest, signal: Abort
   if (req.voice && config.voice.chatModel) requestedModel = config.voice.chatModel;
   if (gpt?.modelId && !req.modelId) requestedModel = gpt.modelId;
   const cfg = resolveModel(config, secrets, requestedModel);
+  if (cfg.provider === "openrouter") await recordHit(OPENROUTER_USAGE_KEY).catch(() => {});
 
   if (gpt && !gpt.capabilities.search) toolsOn.search = false;
   if (gpt && !gpt.capabilities.image) toolsOn.image = false;
@@ -325,26 +419,41 @@ export async function runChat(user: SessionUser, req: ChatRequest, signal: Abort
       };
 
       try {
-        await generate({
-          user,
-          config,
-          secrets,
-          cfg,
-          prefs: userInfo.prefs,
-          userName: userInfo.name,
-          project,
-          gpt,
-          history,
-          toolsOn,
-          temporary,
-          voice: !!req.voice,
-          timezone: req.timezone || "UTC",
-          chatId: temporary ? null : finalChatId,
-          body,
-          send,
-          persist,
-          signal,
-        });
+        // Provider hiccups ("upstream" errors, overloads, empty replies) are retried quietly:
+        // up to 3 attempts before the person sees an error.
+        for (let attempt = 1; ; attempt++) {
+          try {
+            await generate({
+              user,
+              config,
+              secrets,
+              cfg,
+              prefs: userInfo.prefs,
+              userName: userInfo.name,
+              project,
+              gpt,
+              history,
+              toolsOn,
+              temporary,
+              voice: !!req.voice,
+              timezone: req.timezone || "UTC",
+              chatId: temporary ? null : finalChatId,
+              body,
+              send,
+              persist,
+              signal,
+            });
+            if (!signal.aborted && !body.text && !body.images?.length && !body.canvas) throw new EmptyReplyError();
+            break;
+          } catch (err) {
+            if (signal.aborted || attempt >= MAX_ATTEMPTS || !isRetryable(err)) throw err;
+            console.warn(`[chat] attempt ${attempt} failed, retrying:`, err instanceof Error ? err.message : err);
+            for (const key of Object.keys(body) as (keyof MessageBody)[]) if (key !== "voice") delete body[key];
+            body.text = "";
+            send({ type: "reset" });
+            await sleep(attempt * 800, signal);
+          }
+        }
         if (signal.aborted) status = "stopped";
       } catch (err) {
         if (signal.aborted) {
@@ -540,7 +649,9 @@ async function generate(ctx: {
     timezone: ctx.timezone,
   });
 
-  const messages = await toModelMessages(user.id, ctx.history, cfg);
+  const helper = cfg.capabilities.vision ? null : resolveVisionHelper(config, secrets);
+  const describe = helper ? makeDescriber({ userId: user.id, helper, secrets, send, body, signal }) : undefined;
+  const messages = await toModelMessages(user.id, ctx.history, cfg, describe);
   const think = toolsOn.think || toolsOn.research ? "high" : "auto";
 
   const result = streamText({
@@ -552,7 +663,7 @@ async function generate(ctx: {
     maxOutputTokens: cfg.provider === "custom" ? undefined : toolsOn.research ? Math.max(config.maxOutputTokens, 32000) : config.maxOutputTokens,
     providerOptions: providerOptionsFor(cfg, think, user.id) as never,
     abortSignal: signal,
-    maxRetries: 1,
+    maxRetries: 0, // runChat retries the whole reply instead
   });
 
   const seenSources = new Set<string>();

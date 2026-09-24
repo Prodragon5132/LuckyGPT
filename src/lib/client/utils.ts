@@ -180,4 +180,5 @@ export function useMediaQuery(query: string, serverValue = true): boolean {
   );
 }
 
-export const useIsDesktop = () => useMediaQuery("(min-width: 768px)");
+export const DESKTOP_QUERY = "(min-width: 768px)";
+export const useIsDesktop = () => useMediaQuery(DESKTOP_QUERY);

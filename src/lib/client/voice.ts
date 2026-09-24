@@ -33,9 +33,64 @@ export async function getMic(): Promise<MediaStream> {
   }
 }
 
+// ---------- iPhone/Safari audio unlock ----------
+// iOS only lets audio play if it was started by a tap. We "unlock" one shared <audio> element,
+// the speech synthesizer and an AudioContext on the first tap, then reuse them for every reply.
+
+let sharedAudio: HTMLAudioElement | null = null;
+let sharedCtx: AudioContext | null = null;
+// 0.1s of silence (tiny valid WAV)
+const SILENCE =
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+
+function audioEl(): HTMLAudioElement {
+  if (!sharedAudio) {
+    sharedAudio = new Audio();
+    sharedAudio.setAttribute("playsinline", "");
+    sharedAudio.preload = "auto";
+  }
+  return sharedAudio;
+}
+
+export function audioContext(): AudioContext {
+  if (!sharedCtx || sharedCtx.state === "closed") {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    sharedCtx = new Ctx();
+  }
+  if (sharedCtx.state === "suspended") sharedCtx.resume().catch(() => {});
+  return sharedCtx;
+}
+
+/** Call from a tap/click handler. Safe to call many times. */
+export function unlockAudio() {
+  try {
+    const a = audioEl();
+    if (!audioUnlocked && (!a.src || a.src === SILENCE)) {
+      a.src = SILENCE;
+      a.play()
+        .then(() => {
+          audioUnlocked = true;
+          // Only stop the silent clip — never real speech that may have started since.
+          if (a.src === SILENCE) a.pause();
+        })
+        .catch(() => {});
+    }
+    audioContext();
+    if (typeof speechSynthesis !== "undefined" && !speechUnlocked) {
+      speechUnlocked = true;
+      const u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0;
+      speechSynthesis.speak(u);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+let speechUnlocked = false;
+let audioUnlocked = false;
+
 export function levelMeter(stream: MediaStream): { level: () => number; close: () => void } {
-  const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  const ctx = new Ctx();
+  const ctx = audioContext();
   const src = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 1024;
@@ -50,7 +105,7 @@ export function levelMeter(stream: MediaStream): { level: () => number; close: (
     },
     close() {
       src.disconnect();
-      ctx.close().catch(() => {});
+      analyser.disconnect();
     },
   };
 }
@@ -102,6 +157,25 @@ export async function transcribeBlob(blob: Blob, signal?: AbortSignal): Promise<
 
 // ---------- Browser speech recognition (free fallback) ----------
 
+const SERVER_STT_HINT = "An admin can switch Settings → Voice → Speech to text to OpenRouter, OpenAI or Groq so it works everywhere.";
+
+function browserSttError(code: string): string {
+  switch (code) {
+    case "not-allowed":
+      return "Microphone permission was denied. Allow the microphone for this site in your browser settings.";
+    case "service-not-allowed":
+      return `This browser (or iPhone home-screen app) doesn't allow its built-in speech recognition here. ${SERVER_STT_HINT}`;
+    case "network":
+      return `Your browser's built-in speech recognition isn't working (it only works in Chrome, Edge and Safari, and needs internet). ${SERVER_STT_HINT}`;
+    case "audio-capture":
+      return "No microphone was found. Check that one is connected and allowed.";
+    case "language-not-supported":
+      return "Your spoken language isn't supported by the browser's speech recognition. Change it in Settings → General.";
+    default:
+      return `Speech recognition error (${code}). ${SERVER_STT_HINT}`;
+  }
+}
+
 interface SpeechRecognitionLike {
   lang: string;
   continuous: boolean;
@@ -146,7 +220,7 @@ export function createRecognizer(opts: {
   };
   r.onerror = (e) => {
     if (e.error === "no-speech" || e.error === "aborted") return;
-    opts.onError?.(e.error === "not-allowed" ? "Microphone permission was denied." : `Speech recognition error: ${e.error}`);
+    opts.onError?.(browserSttError(e.error));
   };
   r.onend = () => opts.onEnd?.();
   return r;
@@ -177,7 +251,6 @@ export function stopSpeaking() {
   currentAbort = null;
   if (currentAudio) {
     currentAudio.pause();
-    currentAudio.src = "";
     currentAudio = null;
   }
   if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
@@ -194,23 +267,30 @@ export async function fetchSpeech(text: string, voice: string | undefined, signa
   return res.blob();
 }
 
-export function playBlob(blob: Blob, signal?: AbortSignal): Promise<void> {
+/** Plays audio on the shared element. Resolves true if it played, false if the browser refused. */
+export function playBlob(blob: Blob, signal?: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
+    const audio = audioEl();
     currentAudio = audio;
-    const done = () => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      audio.onended = null;
+      audio.onerror = null;
       URL.revokeObjectURL(url);
       if (currentAudio === audio) currentAudio = null;
-      resolve();
+      resolve(ok);
     };
-    audio.onended = done;
-    audio.onerror = done;
+    audio.onended = () => done(true);
+    audio.onerror = () => done(false);
     signal?.addEventListener("abort", () => {
       audio.pause();
-      done();
+      done(true);
     });
-    audio.play().catch(done);
+    audio.src = url;
+    audio.play().catch(() => done(false));
   });
 }
 
@@ -248,11 +328,19 @@ function chunkText(text: string, max = 1200): string[] {
   return out;
 }
 
+let lastVoiceWarning = 0;
+/** Tells the person (at most once a minute) why the server voice failed; speech falls back to the browser voice. */
+function warnVoice(onError: ((msg: string) => void) | undefined, msg: string) {
+  if (!onError || Date.now() - lastVoiceWarning < 60_000) return;
+  lastVoiceWarning = Date.now();
+  onError(`${msg} Using the browser's voice instead.`);
+}
+
 /** "Read aloud" for a whole message. */
 export async function readAloud(
   id: string,
   markdown: string,
-  cfg: { tts: "browser" | "server"; voice?: string; lang?: string },
+  cfg: { tts: "browser" | "server"; voice?: string; lang?: string; onError?: (msg: string) => void },
 ): Promise<void> {
   stopSpeaking();
   const abort = new AbortController();
@@ -263,11 +351,20 @@ export async function readAloud(
   try {
     if (cfg.tts === "server") {
       // Fetch the next chunk while the current one plays.
-      let next: Promise<Blob> | null = parts.length ? fetchSpeech(parts[0], cfg.voice, abort.signal) : null;
+      const get = (i: number) =>
+        fetchSpeech(parts[i], cfg.voice, abort.signal).catch((e: Error) => {
+          if (!abort.signal.aborted) warnVoice(cfg.onError, e.message);
+          return null;
+        });
+      let next: Promise<Blob | null> | null = parts.length ? get(0) : null;
       for (let i = 0; i < parts.length && !abort.signal.aborted; i++) {
         const blob = await next!;
-        next = i + 1 < parts.length ? fetchSpeech(parts[i + 1], cfg.voice, abort.signal) : null;
-        await playBlob(blob, abort.signal);
+        next = i + 1 < parts.length ? get(i + 1) : null;
+        const played = blob ? await playBlob(blob, abort.signal) : false;
+        if (!played && !abort.signal.aborted) {
+          if (blob) warnVoice(cfg.onError, "The browser blocked audio playback.");
+          await speakBrowser(parts[i], { lang: cfg.lang }, abort.signal);
+        }
       }
     } else {
       for (const p of parts) {

@@ -228,7 +228,7 @@ export function Modal({
   if (!open) return null;
   return (
     <Portal>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] p-3 fade-in" onMouseDown={onClose}>
+      <div className="safe-modal fixed inset-0 z-50 flex items-center justify-center bg-[var(--overlay)] fade-in" onMouseDown={onClose}>
         <div
           role="dialog"
           aria-modal="true"
@@ -507,7 +507,7 @@ export function Toasts() {
   const dismiss = useApp((s) => s.dismissToast);
   return (
     <Portal>
-      <div className="pointer-events-none fixed inset-x-0 top-3 z-[80] flex flex-col items-center gap-2 px-3">
+      <div className="pointer-events-none fixed inset-x-0 top-[max(12px,env(safe-area-inset-top))] z-[80] flex flex-col items-center gap-2 px-3">
         {toasts.map((t) => (
           <div
             key={t.id}

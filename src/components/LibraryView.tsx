@@ -57,7 +57,7 @@ export function LibraryView() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={fileUrl(f.id)} alt={f.name} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]" />
                 </button>
-                <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100 touch:opacity-100">
                   {f.chatId && (
                     <button
                       onClick={() => router.push(`/c/${f.chatId}`)}

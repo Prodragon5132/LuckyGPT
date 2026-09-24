@@ -18,7 +18,7 @@ export function Lightbox() {
   if (!lb) return null;
   return (
     <Portal>
-      <div className="fixed inset-0 z-[65] flex flex-col bg-black/90 fade-in" onClick={() => set({ lightbox: null })}>
+      <div className="safe-area fixed inset-0 z-[65] flex flex-col bg-black/90 fade-in" onClick={() => set({ lightbox: null })}>
         <div className="flex items-center justify-end gap-2 p-3" onClick={(e) => e.stopPropagation()}>
           <a
             href={fileUrl(lb.id, { download: true, share: lb.share })}

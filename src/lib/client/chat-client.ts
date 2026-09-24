@@ -279,6 +279,21 @@ export async function sendMessage(opts: SendOptions): Promise<{ key: string; ok:
       case "error":
         patchAssistant(() => ({ error: ev.message }));
         break;
+      case "reset":
+        // The server is quietly retrying: drop the partial answer.
+        pendingText = "";
+        pendingReasoning = "";
+        patchAssistant(() => ({
+          text: "",
+          reasoning: undefined,
+          reasoningMs: undefined,
+          sources: undefined,
+          activity: undefined,
+          images: undefined,
+          canvas: undefined,
+          error: undefined,
+        }));
+        break;
       case "done":
         patchAssistant(() => ({ status: ev.status }));
         break;

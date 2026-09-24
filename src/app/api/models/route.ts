@@ -1,12 +1,12 @@
 import { handler, json } from "@/lib/server/http";
 import { getConfig, getSecrets } from "@/lib/server/settings";
-import { enabledModels, imageModel, speechModel, toModelInfo, transcriptionModel, ttsVoices } from "@/lib/server/providers";
+import { enabledModels, imageModel, speechModel, sttReady, toModelInfo, ttsVoices } from "@/lib/server/providers";
 import type { VoiceClientConfig } from "@/lib/shared/types";
 
 export const GET = handler(async () => {
   const [config, secrets] = await Promise.all([getConfig(), getSecrets()]);
   const models = enabledModels(config, secrets).map((m) => toModelInfo(m, secrets));
-  const stt = config.voice.stt.provider !== "browser" && transcriptionModel(config, secrets) ? "server" : "browser";
+  const stt = config.voice.stt.provider !== "browser" && sttReady(config, secrets) ? "server" : "browser";
   const tts = config.voice.tts.provider !== "browser" && speechModel(config, secrets) ? "server" : "browser";
   const voice: VoiceClientConfig = {
     stt,

@@ -113,7 +113,12 @@ function VoiceSession() {
     const take = () => {
       const text = speakQueue.current.shift();
       if (!text) return null;
-      const audio = useServerTts ? fetchSpeech(text, voice, abort.signal).catch(() => null) : null;
+      const audio = useServerTts
+        ? fetchSpeech(text, voice, abort.signal).catch((e: Error) => {
+            if (!abort.signal.aborted) setError(`${e.message} Using the browser's voice instead.`);
+            return null;
+          })
+        : null;
       return { text, audio };
     };
     let pending: ReturnType<typeof take> = null;
@@ -131,7 +136,9 @@ function VoiceSession() {
         const blob = await cur.audio;
         if (abort.signal.aborted) break;
         pending = take();
-        if (blob) await playBlob(blob, abort.signal);
+        const played = blob ? await playBlob(blob, abort.signal) : false;
+        // Server voice failed or was blocked: say it with the browser's voice so the conversation keeps going.
+        if (!played && !abort.signal.aborted) await speakBrowser(cur.text, { lang: prefs?.spokenLanguage }, abort.signal);
       } else {
         await speakBrowser(cur.text, { lang: prefs?.spokenLanguage, voiceName: voice }, abort.signal);
       }
@@ -184,6 +191,10 @@ function VoiceSession() {
             const { sentences, rest } = takeSentences(buffer, false);
             buffer = rest;
             speakQueue.current.push(...sentences.map(plainForSpeech).filter(Boolean));
+          } else if (ev.type === "reset") {
+            // The server is retrying the reply: forget the unsent part.
+            buffer = "";
+            speakQueue.current = [];
           } else if (ev.type === "error") {
             speakQueue.current.push("Sorry, something went wrong. " + ev.message);
           }
@@ -393,7 +404,7 @@ function VoiceSession() {
 
   return (
     <Portal>
-      <div className="fixed inset-0 z-[60] flex flex-col items-center bg-surface text-fg fade-in">
+      <div className="safe-area fixed inset-0 z-[60] flex flex-col items-center bg-surface text-fg fade-in">
         <div className="flex w-full items-center justify-between p-4">
           <span className="text-sm text-fg-3">{useServerTts ? "Voice mode" : "Voice mode · browser voice"}</span>
           <span />
@@ -426,7 +437,7 @@ function VoiceSession() {
             </div>
           )}
         </div>
-        <div className="safe-bottom flex items-center gap-4 pb-10">
+        <div className="flex items-center gap-4 pb-10">
           <button
             onClick={() => setCaptions((c) => !c)}
             className={cn("flex h-14 w-14 items-center justify-center rounded-full bg-muted text-fg hover:opacity-80", !captions && "opacity-60")}

@@ -19,7 +19,9 @@ The app is free. You only pay the AI provider for what you actually use, usually
 - **Thinking**: shows "Thinking…" and then "Thought for 12s", which you can expand to read the reasoning (for models that think).
 - **Web search** with a **Sources** list. It uses each provider's own search: OpenAI, Claude, Gemini (Google Search), and OpenRouter.
 - **Image generation** (OpenAI gpt-image, Gemini "Nano Banana", or OpenRouter). Just ask "draw me…", or edit a photo you uploaded.
-- **Files & photos**: images (for models that can see), PDFs, Word documents, and text/code files. Drag and drop or paste works too.
+- **Files & photos**: images, PDFs, Word documents, and text/code files. Drag and drop or paste works too. Text-only models can still "see" photos: pick an **Image understanding** model in Settings → Models (any OpenRouter vision model works) and it describes each photo to the chat model.
+- **Reliable answers**: if a provider hiccups ("upstream" errors, overloads, empty replies), LuckyGPT quietly retries up to 3 times before showing an error.
+- **Usage bar**: tap your name to see OpenRouter spending against your credits or key limit, plus messages sent today out of 1000 (OpenRouter's daily free-model limit).
 - **Voice**:
   - 🎤 **Dictate** in the composer.
   - 🔊 **Read aloud** on any answer.
@@ -34,7 +36,7 @@ The app is free. You only pay the AI provider for what you actually use, usually
 - **Data controls**: archive, archive all, delete all, and **export all your data**.
 - **Security**: 2-step login (authenticator app + recovery codes), change password, see your devices, and log out one device or all of them.
 - **Multiple people**: each family member gets their own private account. **Admins can't read other people's chats.**
-- Installable on phones: open the site, then **Share → Add to Home Screen**.
+- **iPhone app**: open the site in Safari, then **Share → Add to Home Screen**. It runs full-screen like an app: safe areas and the keyboard are handled, you can swipe from the left edge to open the sidebar, and voice plays after a tap. For voice mode in the home-screen app, set Speech to text to a server provider (OpenRouter, OpenAI or Groq), because the iPhone doesn't allow its built-in recognition there.
 
 ---
 
@@ -93,7 +95,7 @@ You'll end up with a link like `https://luckygpt-yourname.vercel.app` that your 
    - Google Gemini: <https://aistudio.google.com/apikey>
    - OpenRouter: <https://openrouter.ai/keys>
 2. A few good models are added automatically. Change them in **Settings → Models**: **Add models** browses everything your key can use, and **Test** checks that a model works.
-3. Optional: in **Settings → Voice**, pick the speech-to-text and text-to-speech providers (OpenAI, Google, OpenRouter, or ElevenLabs) and a small, fast model for voice chats.
+3. Optional: in **Settings → Voice**, pick the speech-to-text and text-to-speech providers (OpenAI, Google, Groq, OpenRouter, or ElevenLabs) and a small, fast model for voice chats. With OpenRouter you can do both with one key, for example `openai/gpt-4o-mini-transcribe` to listen and `google/gemini-3.1-flash-tts-preview` to talk.
 4. Optional: add a second OpenRouter key under **OpenRouter — chat only**. Chat then bills to that key, while voice and images keep using the main OpenRouter key.
 
 ### 6. Give your dad an account
@@ -160,7 +162,8 @@ Add them in **Settings → API keys → Custom endpoints**, for example `http://
 | Setup page says the code is wrong | Check the `SETUP_CODE` environment variable, and redeploy after changing it. |
 | "The API key was rejected" | Paste the key again in Settings → API keys, and check billing is set up with that provider. |
 | "Model ID wasn't found" | Fix or remove the model in Settings → Models. Use **Add models** to pick from the real list. |
-| Voice mode can't hear you | Allow the microphone in the browser. Browser speech only works in Chrome, Edge, or Safari, so pick a server speech-to-text provider in Settings → Voice for other browsers. |
+| Voice mode can't hear you / dictation fails | Allow the microphone in the browser. The free "Browser" speech-to-text only works in Chrome, Edge and Safari (not Brave, Firefox or the iPhone home-screen app), so pick OpenRouter, OpenAI or Groq under Settings → Voice → Speech to text. |
+| Voice replies are silent or robotic | The server voice failed, and LuckyGPT fell back to the browser's voice. The red message says why (for example, a wrong model or voice ID). |
 | File won't upload | Files must be 4 MB or smaller. Photos are shrunk automatically. |
 
 ---
